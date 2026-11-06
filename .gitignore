@@ -1,0 +1,16 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual Environment
+venv/
+env/
+
+# Database file
+bank_statement.db
+
+# Uploaded & extracted PDF/Excel files
+*.pdf
+*.xlsx
+*.zip
+extracted_statements/

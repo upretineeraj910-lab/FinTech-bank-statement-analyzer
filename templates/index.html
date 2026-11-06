@@ -1,0 +1,1608 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FinTech Bank Statement Analyzer & Underwriting Suite</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Chart.js for analytics -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Consolas', 'monospace'],
+          },
+          colors: {
+            navy: {
+              950: '#070A11',
+              900: '#0B0F19',
+              850: '#0F172A',
+              800: '#151E32',
+              700: '#1E293B',
+              600: '#334155',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* Modern dialog modal styles adhering to guidance */
+    dialog:modal {
+      overscroll-behavior: contain;
+    }
+    dialog::backdrop {
+      overflow: hidden;
+      overscroll-behavior: contain;
+      background: rgba(3, 7, 18, 0.75);
+      backdrop-filter: blur(6px);
+    }
+    /* Custom scrollbars */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0B0F19;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+  </style>
+</head>
+<body class="bg-navy-950 text-slate-100 font-sans min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white">
+
+  <!-- ================= TOP NAVIGATION BAR ================= -->
+  <header class="sticky top-0 z-30 bg-navy-900/90 backdrop-blur-md border-b border-navy-700/80 px-4 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+    <!-- Brand & Version -->
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-emerald-500 p-0.5 shadow-lg shadow-indigo-500/20 flex items-center justify-center">
+        <div class="w-full h-full bg-navy-900 rounded-[10px] flex items-center justify-center text-indigo-400">
+          <i data-lucide="shield-check" class="w-5 h-5"></i>
+        </div>
+      </div>
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="font-bold text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-indigo-200 bg-clip-text text-transparent">FinTech UnderwriteIQ</span>
+          <span class="text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">On-Demand Ingestion</span>
+        </div>
+        <p class="text-xs text-slate-400">Automated Statement Parsing & Credit Underwriting Intelligence</p>
+      </div>
+    </div>
+
+    <!-- Actions & Statement Switcher -->
+    <div class="flex flex-wrap items-center gap-2.5">
+      
+      <!-- Statement Switcher (Visible only when statements are ingested) -->
+      <div id="navSwitcherContainer" class="hidden items-center bg-navy-850 border border-navy-700 rounded-xl p-1 shadow-inner text-xs">
+        <span class="text-slate-400 px-2 font-medium flex items-center gap-1.5">
+          <i data-lucide="landmark" class="w-3.5 h-3.5 text-indigo-400"></i> Statement:
+        </span>
+        <select id="bankSwitcher" onchange="changeStatementScope(this.value)" class="bg-navy-800 text-slate-200 font-semibold py-1.5 px-3 rounded-lg border border-navy-600 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer">
+          <!-- Populated dynamically via JS -->
+        </select>
+      </div>
+
+      <!-- Upload Additional Button (always accessible) -->
+      <button onclick="openUploadModal()" class="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white text-xs font-semibold shadow-md shadow-indigo-600/25 transition">
+        <i data-lucide="upload-cloud" class="w-4 h-4"></i>
+        <span>Upload Statement</span>
+      </button>
+
+      <!-- Reset Session / New Upload Button -->
+      <button onclick="resetSession()" title="Clear current session and reset to clean state" class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-navy-800 hover:bg-rose-950/60 hover:text-rose-300 hover:border-rose-700/60 text-slate-300 border border-navy-600 active:scale-95 text-xs font-semibold transition">
+        <i data-lucide="rotate-ccw" class="w-3.5 h-3.5 text-rose-400"></i>
+        <span>Reset / New Upload</span>
+      </button>
+
+      <!-- Excel Export Button -->
+      <button id="btnExcelExport" onclick="downloadExcel()" disabled class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600/10 text-emerald-400/50 border border-emerald-500/20 text-xs font-semibold cursor-not-allowed transition">
+        <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+        <span>Excel (.xlsx)</span>
+      </button>
+
+      <!-- JSON LOS Export Button -->
+      <button id="btnJsonExport" onclick="downloadJSON()" disabled class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800/40 text-slate-500 border border-navy-700 text-xs font-semibold cursor-not-allowed transition">
+        <i data-lucide="code-xml" class="w-4 h-4"></i>
+        <span>LOS JSON</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ================= HERO EMPTY-STATE DROPZONE (DEFAULT / CLEAN STATE) ================= -->
+  <section id="emptyStateHero" class="flex-1 flex flex-col items-center justify-center p-6 lg:p-12 max-w-5xl mx-auto w-full">
+    
+    <div class="w-full space-y-8 text-center">
+      
+      <!-- Headline & Introduction -->
+      <div class="space-y-3 max-w-2xl mx-auto">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold">
+          <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+          <span>Clean State • Awaiting Statement Ingestion</span>
+        </div>
+        <h1 class="text-3xl lg:text-4xl font-extrabold text-white tracking-tight leading-tight">
+          FinTech Bank Statement Analyzer & Underwriting Dashboard
+        </h1>
+        <p class="text-sm text-slate-400 leading-relaxed">
+          Drop borrower bank statement PDFs below to trigger real-time layout auto-detection (10-column Federal, 7-column HDFC, SBI, ICICI), salary stability auditing, debt consolidation risk warnings, and balance continuity reconciliation.
+        </p>
+      </div>
+
+      <!-- Main Drag & Drop Hero Card -->
+      <div class="bg-navy-900/90 rounded-3xl border border-navy-700/80 p-6 lg:p-10 shadow-2xl relative overflow-hidden text-left">
+        <div class="absolute -right-16 -top-16 w-56 h-56 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="absolute -left-16 -bottom-16 w-56 h-56 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+        <!-- Dropzone interactive surface -->
+        <div 
+          id="heroDropZone"
+          ondragover="handleHeroDragOver(event)"
+          ondragleave="handleHeroDragLeave(event)"
+          ondrop="handleHeroFileDrop(event)"
+          onclick="document.getElementById('heroFileInput').click()"
+          class="border-2 border-dashed border-navy-600 hover:border-indigo-400 rounded-2xl p-8 lg:p-12 text-center cursor-pointer transition-all duration-300 bg-navy-850/60 hover:bg-navy-800/80 space-y-4 group"
+        >
+          <input type="file" id="heroFileInput" accept=".pdf" multiple class="hidden" onchange="handleHeroFileSelect(event)">
+          
+          <!-- Cloud Upload Pulse Icon -->
+          <div class="w-16 h-16 rounded-2xl bg-indigo-600/10 group-hover:bg-indigo-600/20 text-indigo-400 mx-auto flex items-center justify-center transition shadow-lg shadow-indigo-500/10 group-hover:scale-105">
+            <i data-lucide="upload-cloud" class="w-8 h-8"></i>
+          </div>
+
+          <div class="space-y-1.5">
+            <h3 class="text-base lg:text-lg font-bold text-white tracking-tight">
+              Drag & Drop Bank Statement PDFs Here
+            </h3>
+            <p class="text-xs text-slate-400">
+              Select one or multiple statements simultaneously (Federal, HDFC, SBI, ICICI, Axis, IDFC)
+            </p>
+          </div>
+
+          <!-- Supported Format Badges -->
+          <div class="flex flex-wrap items-center justify-center gap-2 pt-2">
+            <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-navy-800 text-slate-300 border border-navy-700">Federal Bank (10-Col Table)</span>
+            <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-navy-800 text-slate-300 border border-navy-700">HDFC Bank (7-Col Stream)</span>
+            <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-navy-800 text-slate-300 border border-navy-700">SBI Bank Format</span>
+            <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-navy-800 text-slate-300 border border-navy-700">ICICI Bank Format</span>
+          </div>
+
+          <div class="pt-3">
+            <button type="button" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow-lg shadow-indigo-600/30 transition">
+              Browse Files From Device
+            </button>
+          </div>
+        </div>
+
+        <!-- Optional Pre-Filled Password Input for Encrypted Statements -->
+        <div class="mt-5 pt-4 border-t border-navy-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div class="flex items-center gap-2 text-slate-400">
+            <i data-lucide="lock" class="w-4 h-4 text-amber-400"></i>
+            <span>Encrypted / Protected PDF? Optional Decryption Password:</span>
+          </div>
+          <div class="relative flex-1 max-w-xs min-w-[200px]">
+            <input 
+              type="password" 
+              id="heroPasswordInput" 
+              placeholder="e.g. DOB (DDMMYYYY) or PAN"
+              class="w-full bg-navy-800 border border-navy-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            >
+          </div>
+        </div>
+
+        <!-- 5-Phase Parsing Progress Indicator (Hidden until upload triggered) -->
+        <div id="heroProgressContainer" class="hidden mt-6 space-y-3 bg-navy-850 p-5 rounded-2xl border border-navy-700">
+          <div class="flex items-center justify-between text-xs">
+            <div class="flex items-center gap-2">
+              <div class="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-ping"></div>
+              <span id="heroProgressStepText" class="font-bold text-white">Phase 1/5: Inspecting PDF structure...</span>
+            </div>
+            <span id="heroProgressPercent" class="font-mono font-bold text-indigo-400">20%</span>
+          </div>
+          <div class="w-full h-2.5 bg-navy-800 rounded-full overflow-hidden">
+            <div id="heroProgressBar" class="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 rounded-full transition-all duration-300 w-1/5"></div>
+          </div>
+          <p id="heroProgressSub" class="text-[11px] text-slate-400 flex items-center gap-1.5">
+            <i data-lucide="cpu" class="w-3.5 h-3.5 text-indigo-400"></i>
+            <span>Auto-detecting layout: Federal Bank 10-column table vs HDFC 7-column layout engine</span>
+          </p>
+        </div>
+
+        <!-- Error Banner -->
+        <div id="heroErrorBanner" class="hidden mt-4 p-3.5 rounded-xl bg-rose-950/60 border border-rose-500/40 text-rose-300 text-xs"></div>
+      </div>
+
+      <!-- Feature Capability Highlights Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-left">
+        <div class="bg-navy-900/60 rounded-2xl border border-navy-800/80 p-4 space-y-1.5">
+          <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-2">
+            <i data-lucide="badge-percent" class="w-4 h-4"></i>
+          </div>
+          <h4 class="text-xs font-bold text-white">Salary Run-Rate</h4>
+          <p class="text-[11px] text-slate-400">Extracts verified employers & calculates net salary run-rate (~₹17k-20k) with tenure analysis.</p>
+        </div>
+
+        <div class="bg-navy-900/60 rounded-2xl border border-navy-800/80 p-4 space-y-1.5">
+          <div class="w-8 h-8 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center mb-2">
+            <i data-lucide="alert-triangle" class="w-4 h-4"></i>
+          </div>
+          <h4 class="text-xs font-bold text-white">CC Stress Warnings</h4>
+          <p class="text-[11px] text-slate-400">Detects debt consolidation triggers when personal loans are diverted to pay card balances.</p>
+        </div>
+
+        <div class="bg-navy-900/60 rounded-2xl border border-navy-800/80 p-4 space-y-1.5">
+          <div class="w-8 h-8 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center mb-2">
+            <i data-lucide="trending-up" class="w-4 h-4"></i>
+          </div>
+          <h4 class="text-xs font-bold text-white">Stock & MF Flow</h4>
+          <p class="text-[11px] text-slate-400">Separates Angel One withdrawals, ICCL SIP debits, and NSE/BSE clearing dividends.</p>
+        </div>
+
+        <div class="bg-navy-900/60 rounded-2xl border border-navy-800/80 p-4 space-y-1.5">
+          <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center mb-2">
+            <i data-lucide="check-check" class="w-4 h-4"></i>
+          </div>
+          <h4 class="text-xs font-bold text-white">Zero-Variance Audit</h4>
+          <p class="text-[11px] text-slate-400">Mathematically reconciles Opening + Credits - Debits = Closing with zero variance audit.</p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= POPULATED DASHBOARD VIEW (HIDDEN IN CLEAN STATE) ================= -->
+  <div id="dashboardView" class="hidden flex-1 flex flex-col lg:flex-row w-full max-w-[1920px] mx-auto overflow-hidden">
+    
+    <!-- ================= LEFT SIDEBAR (BORROWER PROFILE & UNDERWRITING INSIGHTS) ================= -->
+    <aside class="w-full lg:w-80 xl:w-96 flex-shrink-0 bg-navy-900 border-r border-navy-800 p-5 space-y-5 overflow-y-auto max-h-none lg:max-h-[calc(100vh-65px)]">
+      
+      <!-- Borrower Snapshot Card -->
+      <div class="bg-navy-850 rounded-2xl border border-navy-700/80 p-4 shadow-sm relative overflow-hidden">
+        <div class="absolute -right-4 -top-4 w-24 h-24 bg-indigo-500/10 rounded-full blur-2xl"></div>
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-[11px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+            <i data-lucide="user-check" class="w-3.5 h-3.5"></i> Borrower Snapshot
+          </span>
+          <span id="sidebarBankBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">Federal & HDFC</span>
+        </div>
+
+        <div class="space-y-2">
+          <div>
+            <h2 id="borrowerName" class="text-base font-bold text-white tracking-tight">K N SAID IBIN</h2>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <span id="accountNo" class="text-xs font-mono text-slate-300">A/C: 1512...745</span>
+              <button onclick="copyAccountNo()" title="Copy Account No" class="text-slate-500 hover:text-slate-300 transition">
+                <i data-lucide="copy" class="w-3 h-3"></i>
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-2 pt-2 border-t border-navy-700/60 text-[11px]">
+            <div>
+              <span class="text-slate-500 block">Branch / Code</span>
+              <span id="branchInfo" class="font-medium text-slate-300 truncate block">Thaikkattukara (1512)</span>
+            </div>
+            <div>
+              <span class="text-slate-500 block">IFSC Code</span>
+              <span id="ifscInfo" class="font-mono font-medium text-slate-300 block">FDRL0001512</span>
+            </div>
+            <div>
+              <span class="text-slate-500 block">Account Type</span>
+              <span id="accTypeInfo" class="font-medium text-slate-300 block truncate">SB FEDSALARY</span>
+            </div>
+            <div>
+              <span class="text-slate-500 block">Statement Period</span>
+              <span id="periodInfo" class="font-medium text-slate-300 block truncate">01-Apr - 04-Nov-2026</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ABB (Average Daily Balance) Highlight Card -->
+        <div class="mt-4 pt-3 border-t border-navy-700/60 bg-navy-900/60 -mx-4 -mb-4 p-4 rounded-b-2xl flex items-center justify-between">
+          <div>
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Average Daily Balance (ABB)</span>
+            <span id="abbAmount" class="text-lg font-bold font-mono text-emerald-400">₹ 20,055.00</span>
+          </div>
+          <div class="text-right">
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">Effective Balance</span>
+            <span id="effectiveBalance" class="text-sm font-bold font-mono text-slate-200">₹ 12,245.42</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Income Stability Score & Employer Switch Alert -->
+      <div class="bg-navy-850 rounded-2xl border border-navy-700/80 p-4 shadow-sm space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+            <i data-lucide="gauge" class="w-3.5 h-3.5"></i> Income Stability Score
+          </span>
+          <span id="stabilityGradeBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Grade A (Prime)</span>
+        </div>
+
+        <div class="flex items-center gap-4">
+          <div class="relative w-16 h-16 flex-shrink-0 flex items-center justify-center">
+            <svg class="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
+              <path class="text-navy-700" stroke-width="3.5" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+              <path id="stabilityScoreCircle" class="text-emerald-400 transition-all duration-1000" stroke-dasharray="82, 100" stroke-width="3.5" stroke-linecap="round" stroke="currentColor" fill="none" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+            </svg>
+            <div class="absolute flex flex-col items-center">
+              <span id="stabilityScoreText" class="text-sm font-extrabold font-mono text-white">82</span>
+              <span class="text-[8px] text-slate-400">/ 100</span>
+            </div>
+          </div>
+
+          <div class="flex-1 space-y-1">
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-slate-400">Verified Run-Rate:</span>
+              <span id="salaryRunRateText" class="font-bold text-emerald-300 font-mono">₹17k - 20k</span>
+            </div>
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-slate-400">Inflow Frequency:</span>
+              <span class="font-medium text-slate-200">Monthly NEFT</span>
+            </div>
+            <div class="flex items-center justify-between text-xs">
+              <span class="text-slate-400">Salary Months:</span>
+              <span id="salaryMonthsCount" class="font-medium text-slate-200 font-mono">5 Months Tagged</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Employer Switch Notification Box -->
+        <div id="employerSwitchAlert" class="bg-indigo-950/40 border border-indigo-500/30 rounded-xl p-2.5 text-xs space-y-1">
+          <div class="flex items-center gap-1.5 font-bold text-indigo-300">
+            <i data-lucide="arrow-right-left" class="w-3.5 h-3.5 text-indigo-400"></i>
+            <span>Employer Transition Detected</span>
+          </div>
+          <p id="employerSwitchNotes" class="text-slate-300 text-[11px] leading-relaxed">
+            Switched from Berg Technologies Private Limited to Aashree Management Services in August 2026 (+18.3% salary hike to ₹20,000).
+          </p>
+        </div>
+      </div>
+
+      <!-- Credit Card Stress Warning (Debt Consolidation Trigger) -->
+      <div id="ccStressCard" class="bg-gradient-to-b from-rose-950/40 to-navy-850 rounded-2xl border border-rose-500/40 p-4 shadow-sm space-y-2.5">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
+            <i data-lucide="alert-triangle" class="w-3.5 h-3.5 text-rose-400 animate-pulse"></i> Credit Card Stress Warning
+          </span>
+          <span id="ccStressBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">DEBT CONSOLIDATION</span>
+        </div>
+
+        <p id="ccStressMessage" class="text-xs text-slate-200 leading-relaxed">
+          Debt Consolidation Trigger: Borrower obtained ₹1,10,000 in Jumbo Personal Loans which was immediately utilized to pay off ₹1,12,655 in revolving credit card bills (₹23.1k on 23-Aug and ₹89.5k on 04-Sep).
+        </p>
+
+        <div class="bg-navy-900/80 rounded-xl p-2.5 border border-navy-700/60 grid grid-cols-2 gap-2 text-[11px]">
+          <div>
+            <span class="text-slate-400 block">Jumbo Loan Disbursed</span>
+            <span id="jumboDisbursedAmount" class="font-bold text-white font-mono">₹ 1,10,000</span>
+          </div>
+          <div>
+            <span class="text-slate-400 block">CC Bills Liquidated</span>
+            <span id="ccLiquidatedAmount" class="font-bold text-rose-400 font-mono">₹ 1,12,655</span>
+          </div>
+        </div>
+        <p class="text-[10px] text-slate-400 italic">High revolver utilization. Personal loan diverted to restructure maxed-out credit card balances.</p>
+      </div>
+
+      <!-- Active Debt Obligations & FOIR Quick Card -->
+      <div class="bg-navy-850 rounded-2xl border border-navy-700/80 p-4 shadow-sm space-y-3">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <i data-lucide="receipt" class="w-3.5 h-3.5 text-rose-400"></i> Active Debt Obligations
+          </span>
+          <span id="activeLendersCountBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300">4 Active Lenders</span>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-xs text-slate-400 block">Est. Monthly EMI Burden:</span>
+            <span id="monthlyEmiAmount" class="text-lg font-bold font-mono text-rose-400">₹ 9,663.00</span>
+          </div>
+          <div class="text-right">
+            <span class="text-xs text-slate-400 block">FOIR Ratio:</span>
+            <span id="foirRatioBadge" class="text-sm font-bold font-mono text-amber-400">48.2%</span>
+          </div>
+        </div>
+
+        <div class="space-y-1 text-xs">
+          <span class="text-slate-400 text-[11px] block">Detected Lending Mandates:</span>
+          <div id="lendersListPills" class="flex flex-wrap gap-1"></div>
+        </div>
+      </div>
+
+      <!-- Cheque Bounce & Mandate Counter -->
+      <div id="sidebarBounceCard" class="bg-emerald-950/20 rounded-2xl border border-emerald-500/30 p-3.5 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+            <i data-lucide="check-circle-2" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <span class="text-xs font-bold text-white block">Bounce Audit Status</span>
+            <span id="bounceStatusText" class="text-[11px] text-emerald-400">0 Bounces • 100% Repayment</span>
+          </div>
+        </div>
+        <span id="sidebarBounceCountBadge" class="text-xs font-extrabold font-mono px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">0</span>
+      </div>
+
+    </aside>
+
+    <!-- ================= MAIN VIEWPORT ================= -->
+    <main class="flex-1 p-4 lg:p-7 space-y-6 overflow-y-auto max-h-none lg:max-h-[calc(100vh-65px)]">
+
+      <!-- ================= 1. EXECUTIVE RISK & KPI CARDS (TOP BAR) ================= -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+        
+        <!-- KPI 1: Monthly Verified Salary -->
+        <div class="bg-navy-900 rounded-2xl border border-navy-700/80 p-4 relative overflow-hidden shadow-sm hover:border-navy-600 transition group">
+          <div class="flex items-center justify-between text-xs mb-2">
+            <span class="text-slate-400 font-medium">Monthly Verified Salary</span>
+            <div class="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+              <i data-lucide="badge-check" class="w-4 h-4"></i>
+            </div>
+          </div>
+          <div class="space-y-1">
+            <div id="kpiSalaryRunRate" class="text-xl font-bold font-mono text-white tracking-tight">₹0</div>
+            <div id="kpiEmployerName" class="text-xs text-emerald-400 truncate font-medium">—</div>
+            <div class="text-[11px] text-slate-500 flex items-center justify-between pt-1">
+              <span id="kpiAvgSalary">Avg: ₹0/mo</span>
+              <span class="text-emerald-400 font-semibold">NEFT Verified</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI 2: Active Debt & EMI Outflows -->
+        <div class="bg-navy-900 rounded-2xl border border-navy-700/80 p-4 relative overflow-hidden shadow-sm hover:border-navy-600 transition group">
+          <div class="flex items-center justify-between text-xs mb-2">
+            <span class="text-slate-400 font-medium">Active Debt & Outflows</span>
+            <div class="w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center">
+              <i data-lucide="credit-card" class="w-4 h-4"></i>
+            </div>
+          </div>
+          <div class="space-y-1">
+            <div id="kpiMonthlyObligations" class="text-xl font-bold font-mono text-white tracking-tight">₹ 0 /mo</div>
+            <div id="kpiJumboSummary" class="text-xs text-rose-400 truncate font-medium">₹0 Jumbo Loans</div>
+            <div class="text-[11px] text-slate-500 flex items-center justify-between pt-1">
+              <span id="kpiMandateCount">0 Mandates</span>
+              <span id="kpiFoirSummary" class="text-rose-400 font-semibold">FOIR ~0%</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI 3: Stock Market & MF Flow -->
+        <div class="bg-navy-900 rounded-2xl border border-navy-700/80 p-4 relative overflow-hidden shadow-sm hover:border-navy-600 transition group">
+          <div class="flex items-center justify-between text-xs mb-2">
+            <span class="text-slate-400 font-medium">Stock & MF Investments</span>
+            <div class="w-7 h-7 rounded-lg bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
+              <i data-lucide="trending-up" class="w-4 h-4"></i>
+            </div>
+          </div>
+          <div class="space-y-1">
+            <div id="kpiStockTotalFlow" class="text-xl font-bold font-mono text-white tracking-tight">₹ 0</div>
+            <div class="text-xs text-indigo-400 truncate font-medium">Angel One & ICCL Clearing</div>
+            <div class="text-[11px] text-slate-500 flex items-center justify-between pt-1">
+              <span id="kpiAngelInflows">Angel: ₹0</span>
+              <span class="text-indigo-400 font-semibold">NSE/BSE MFSS</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI 4: Credit Card & Wallet Churning -->
+        <div class="bg-navy-900 rounded-2xl border border-navy-700/80 p-4 relative overflow-hidden shadow-sm hover:border-navy-600 transition group">
+          <div class="flex items-center justify-between text-xs mb-2">
+            <span class="text-slate-400 font-medium">CC & Wallet Churning</span>
+            <div class="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
+              <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+            </div>
+          </div>
+          <div class="space-y-1">
+            <div id="kpiChurnVolume" class="text-xl font-bold font-mono text-white tracking-tight">₹ 0</div>
+            <div class="text-xs text-amber-400 truncate font-medium">CRED & Card Revolvers</div>
+            <div class="text-[11px] text-slate-500 flex items-center justify-between pt-1">
+              <span id="kpiCredFlowSummary">Out: ₹0 | In: ₹0</span>
+              <span class="text-amber-400 font-semibold">Velocity Metric</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- KPI 5: Cheque / Mandate Bounce Counter -->
+        <div class="bg-navy-900 rounded-2xl border border-navy-700/80 p-4 relative overflow-hidden shadow-sm hover:border-navy-600 transition group">
+          <div class="flex items-center justify-between text-xs mb-2">
+            <span class="text-slate-400 font-medium">Bounce & Failure Audit</span>
+            <div id="kpiBounceIconWrap" class="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+              <i data-lucide="shield-alert" class="w-4 h-4"></i>
+            </div>
+          </div>
+          <div class="space-y-1">
+            <div class="flex items-center gap-2">
+              <span id="kpiBounceCount" class="text-xl font-bold font-mono text-emerald-400">0 Bounces</span>
+            </div>
+            <div id="kpiBounceTag" class="text-xs text-emerald-400 truncate font-medium">100% Repayment Track</div>
+            <div class="text-[11px] text-slate-500 flex items-center justify-between pt-1">
+              <span>ACH / NACH / Chq</span>
+              <span id="kpiBounceCleanTag" class="text-emerald-400 font-semibold">CLEAN</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ================= 2. MATHEMATICAL BALANCE RECONCILIATION BAR ================= -->
+      <div class="bg-navy-900/90 rounded-2xl border border-navy-700/80 p-4 shadow-sm flex flex-wrap items-center justify-between gap-4">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
+            <i data-lucide="calculator" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold text-white">Live Statement Reconciliation Audit</span>
+              <span id="reconciledBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                100% MATCH • 0 VARIANCE
+              </span>
+            </div>
+            <p class="text-[11px] text-slate-400">
+              Formula: Opening Balance (<span id="reconcOpenBal" class="text-slate-300 font-mono">₹0</span>) + Total Credits (<span id="reconcCredits" class="text-emerald-400 font-mono">₹0</span>) - Total Debits (<span id="reconcDebits" class="text-rose-400 font-mono">₹0</span>) = Closing Balance (<span id="reconcCloseBal" class="text-slate-200 font-mono">₹0</span>)
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-4 text-xs font-mono">
+          <div class="text-right">
+            <span class="text-slate-500 block text-[10px]">TOTAL TRANSACTIONS</span>
+            <span id="reconcTxnCount" class="font-bold text-white">0 Rows</span>
+          </div>
+          <div class="h-6 w-px bg-navy-700"></div>
+          <div class="text-right">
+            <span class="text-slate-500 block text-[10px]">DEBITS / CREDITS</span>
+            <span id="reconcDrCrCount" class="font-bold text-slate-300">0 DR / 0 CR</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 3. INTERACTIVE CHARTS SECTION ================= -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <!-- Chart 1: Monthly Cashflow Trend (Bar & Line) -->
+        <div class="lg:col-span-2 bg-navy-900 rounded-2xl border border-navy-700/80 p-5 shadow-sm space-y-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                <i data-lucide="bar-chart-3" class="w-4 h-4 text-indigo-400"></i> Monthly Cashflow Dynamics
+              </h3>
+              <p class="text-xs text-slate-400">Total Credits (Inflow) vs Debits (Outflow) & Net Monthly Savings</p>
+            </div>
+            <div class="flex items-center gap-3 text-xs">
+              <span class="flex items-center gap-1.5 text-emerald-400"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span> Inflows</span>
+              <span class="flex items-center gap-1.5 text-rose-400"><span class="w-2.5 h-2.5 rounded-sm bg-rose-500"></span> Outflows</span>
+              <span class="flex items-center gap-1.5 text-indigo-400"><span class="w-2.5 h-2.5 rounded-sm bg-indigo-500"></span> Net Savings</span>
+            </div>
+          </div>
+          <div class="h-64 relative">
+            <canvas id="cashflowChart"></canvas>
+          </div>
+        </div>
+
+        <!-- Chart 2: Category Outflow Distribution (Donut) -->
+        <div class="bg-navy-900 rounded-2xl border border-navy-700/80 p-5 shadow-sm space-y-3">
+          <div>
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <i data-lucide="pie-chart" class="w-4 h-4 text-amber-400"></i> Outflow Category Split
+            </h3>
+            <p class="text-xs text-slate-400">Proportional expenditure across audited risk buckets</p>
+          </div>
+          <div class="h-64 relative flex items-center justify-center">
+            <canvas id="categoryChart"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- ================= 4. MULTI-TAB TRANSACTION EXPLORER ================= -->
+      <div class="bg-navy-900 rounded-2xl border border-navy-700/80 shadow-sm overflow-hidden">
+        
+        <!-- Tab Navigation Bar -->
+        <div class="flex flex-wrap items-center border-b border-navy-700/80 bg-navy-850 px-4 pt-2 gap-1">
+          
+          <button onclick="switchTab('all')" id="tab-all" class="tab-btn px-4 py-2.5 text-xs font-semibold rounded-t-xl transition flex items-center gap-2 border-b-2 border-indigo-500 text-white bg-navy-900">
+            <i data-lucide="list" class="w-3.5 h-3.5"></i>
+            <span>All Transactions</span>
+            <span id="tabCountAll" class="px-2 py-0.5 rounded-full text-[10px] bg-slate-800 text-slate-300 font-mono">0</span>
+          </button>
+
+          <button onclick="switchTab('salary')" id="tab-salary" class="tab-btn px-4 py-2.5 text-xs font-semibold rounded-t-xl transition flex items-center gap-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200">
+            <i data-lucide="briefcase" class="w-3.5 h-3.5 text-emerald-400"></i>
+            <span>Salary & Inflows</span>
+            <span id="tabCountSalary" class="px-2 py-0.5 rounded-full text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 font-mono">0</span>
+          </button>
+
+          <button onclick="switchTab('loans')" id="tab-loans" class="tab-btn px-4 py-2.5 text-xs font-semibold rounded-t-xl transition flex items-center gap-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200">
+            <i data-lucide="landmark" class="w-3.5 h-3.5 text-rose-400"></i>
+            <span>Loans & EMIs</span>
+            <span id="tabCountLoans" class="px-2 py-0.5 rounded-full text-[10px] bg-rose-950 text-rose-300 border border-rose-800 font-mono">0</span>
+          </button>
+
+          <button onclick="switchTab('trading')" id="tab-trading" class="tab-btn px-4 py-2.5 text-xs font-semibold rounded-t-xl transition flex items-center gap-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200">
+            <i data-lucide="candlestick-chart" class="w-3.5 h-3.5 text-violet-400"></i>
+            <span>Stock Trading & MF</span>
+            <span id="tabCountTrading" class="px-2 py-0.5 rounded-full text-[10px] bg-violet-950 text-violet-300 border border-violet-800 font-mono">0</span>
+          </button>
+
+          <button onclick="switchTab('churn')" id="tab-churn" class="tab-btn px-4 py-2.5 text-xs font-semibold rounded-t-xl transition flex items-center gap-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200">
+            <i data-lucide="repeat" class="w-3.5 h-3.5 text-amber-400"></i>
+            <span>Wallet & CC Churning</span>
+            <span id="tabCountChurn" class="px-2 py-0.5 rounded-full text-[10px] bg-amber-950 text-amber-300 border border-amber-800 font-mono">0</span>
+          </button>
+
+          <button onclick="switchTab('bounce')" id="tab-bounce" class="tab-btn px-4 py-2.5 text-xs font-semibold rounded-t-xl transition flex items-center gap-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200">
+            <i data-lucide="shield-check" class="w-3.5 h-3.5 text-emerald-400"></i>
+            <span>Bounce Audit</span>
+            <span id="tabCountBounce" class="px-2 py-0.5 rounded-full text-[10px] bg-emerald-950 text-emerald-300 border border-emerald-800 font-mono">0</span>
+          </button>
+
+        </div>
+
+        <!-- Filter & Search Controls Bar -->
+        <div class="p-4 bg-navy-900 border-b border-navy-700/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+          
+          <!-- Search input -->
+          <div class="relative flex-1 min-w-[220px]">
+            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+            <input 
+              id="searchInput" 
+              type="text" 
+              placeholder="Search narration, ref, merchant, bank..." 
+              oninput="debounceSearch()"
+              class="w-full bg-navy-850 border border-navy-700 rounded-xl pl-9 pr-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 font-medium"
+            >
+          </div>
+
+          <!-- Date Range Filter -->
+          <div class="flex items-center gap-1.5 bg-navy-850 border border-navy-700 rounded-xl px-2 py-1">
+            <i data-lucide="calendar" class="w-3.5 h-3.5 text-slate-400"></i>
+            <input id="startDateInput" type="date" onchange="fetchTransactions(1)" class="bg-transparent text-slate-200 text-xs focus:outline-none">
+            <span class="text-slate-500">to</span>
+            <input id="endDateInput" type="date" onchange="fetchTransactions(1)" class="bg-transparent text-slate-200 text-xs focus:outline-none">
+          </div>
+
+          <!-- Amount Filter -->
+          <div class="flex items-center gap-1.5 bg-navy-850 border border-navy-700 rounded-xl px-2.5 py-1">
+            <span class="text-slate-400 text-[11px]">Min ₹</span>
+            <input id="minAmountInput" type="number" placeholder="0" onchange="fetchTransactions(1)" class="w-16 bg-transparent text-slate-200 text-xs focus:outline-none font-mono">
+            <span class="text-slate-500">Max ₹</span>
+            <input id="maxAmountInput" type="number" placeholder="∞" onchange="fetchTransactions(1)" class="w-16 bg-transparent text-slate-200 text-xs focus:outline-none font-mono">
+          </div>
+
+          <!-- Reset Filter Button -->
+          <button onclick="resetFilters()" class="px-3 py-2 rounded-xl bg-navy-800 hover:bg-navy-700 text-slate-400 hover:text-slate-200 border border-navy-700 flex items-center gap-1.5 transition">
+            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i>
+            <span>Reset</span>
+          </button>
+
+          <!-- Per Page Limit -->
+          <div class="flex items-center gap-1.5 text-slate-400">
+            <span>Show:</span>
+            <select id="limitSelect" onchange="fetchTransactions(1)" class="bg-navy-850 text-slate-200 border border-navy-700 rounded-lg px-2 py-1 text-xs focus:outline-none">
+              <option value="25">25</option>
+              <option value="50" selected>50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Dynamic Data Table -->
+        <div class="overflow-x-auto">
+          <table class="w-full text-left text-xs whitespace-nowrap">
+            <thead class="bg-navy-850/80 text-slate-400 uppercase tracking-wider text-[10px] font-semibold border-b border-navy-700/80">
+              <tr>
+                <th class="px-4 py-3 cursor-pointer hover:text-white" onclick="changeSort('iso_date')">
+                  <div class="flex items-center gap-1">Date <i data-lucide="arrow-up-down" class="w-3 h-3"></i></div>
+                </th>
+                <th class="px-3 py-3">Bank</th>
+                <th class="px-4 py-3 min-w-[320px]">Narration / Particulars</th>
+                <th class="px-3 py-3 text-center">Category Audit</th>
+                <th class="px-4 py-3 text-right cursor-pointer hover:text-white" onclick="changeSort('debit')">
+                  <div class="flex items-center justify-end gap-1">Withdrawal (DR) <i data-lucide="arrow-up-down" class="w-3 h-3"></i></div>
+                </th>
+                <th class="px-4 py-3 text-right cursor-pointer hover:text-white" onclick="changeSort('credit')">
+                  <div class="flex items-center justify-end gap-1">Deposit (CR) <i data-lucide="arrow-up-down" class="w-3 h-3"></i></div>
+                </th>
+                <th class="px-4 py-3 text-right cursor-pointer hover:text-white" onclick="changeSort('balance')">
+                  <div class="flex items-center justify-end gap-1">Balance <i data-lucide="arrow-up-down" class="w-3 h-3"></i></div>
+                </th>
+              </tr>
+            </thead>
+            <tbody id="transactionTableBody" class="divide-y divide-navy-800/80">
+              <tr>
+                <td colspan="7" class="px-4 py-8 text-center text-slate-400 text-xs">No transactions match the selected filters.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Table Pagination Footer -->
+        <div class="p-4 bg-navy-850 border-t border-navy-700/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div class="text-slate-400">
+            Showing <span id="showingStart" class="font-bold text-white">0</span> to <span id="showingEnd" class="font-bold text-white">0</span> of <span id="showingTotal" class="font-bold text-white">0</span> entries
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="prevPageBtn" onclick="changePage(-1)" disabled class="px-3 py-1.5 rounded-lg bg-navy-800 hover:bg-navy-700 text-slate-300 border border-navy-700 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1">
+              <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i> Prev
+            </button>
+            <span id="pageIndicator" class="px-3 py-1.5 rounded-lg bg-navy-900 text-indigo-300 font-mono border border-navy-700">
+              Page 1 of 1
+            </span>
+            <button id="nextPageBtn" onclick="changePage(1)" disabled class="px-3 py-1.5 rounded-lg bg-navy-800 hover:bg-navy-700 text-slate-300 border border-navy-700 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1">
+              Next <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+    </main>
+  </div>
+
+  <!-- ================= UPLOAD MODAL (ADDITIONAL STATEMENT INGESTION) ================= -->
+  <dialog id="uploadModal" aria-labelledby="uploadModalTitle" class="bg-navy-900 border border-navy-700 text-white p-6 rounded-2xl shadow-2xl max-w-lg w-full">
+    <div class="flex items-center justify-between mb-4">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center">
+          <i data-lucide="file-up" class="w-4 h-4"></i>
+        </div>
+        <div>
+          <h2 id="uploadModalTitle" class="text-base font-bold text-white">Upload Bank Statement</h2>
+          <p class="text-xs text-slate-400">Federal Bank, HDFC Bank, SBI, ICICI (PDF)</p>
+        </div>
+      </div>
+      <button onclick="closeUploadModal()" class="text-slate-400 hover:text-white transition">
+        <i data-lucide="x" class="w-5 h-5"></i>
+      </button>
+    </div>
+
+    <!-- Drag & Drop Zone inside modal -->
+    <div 
+      id="modalDropZone" 
+      ondragover="handleModalDragOver(event)" 
+      ondragleave="handleModalDragLeave(event)" 
+      ondrop="handleModalFileDrop(event)"
+      onclick="document.getElementById('modalFileInput').click()"
+      class="border-2 border-dashed border-navy-600 hover:border-indigo-500 rounded-2xl p-8 text-center cursor-pointer transition bg-navy-850/60 hover:bg-navy-800/60 space-y-3"
+    >
+      <input type="file" id="modalFileInput" accept=".pdf" multiple class="hidden" onchange="handleModalFileSelected(event)">
+      <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 mx-auto flex items-center justify-center">
+        <i data-lucide="upload-cloud" class="w-6 h-6"></i>
+      </div>
+      <div>
+        <p class="text-sm font-semibold text-slate-200">Drag & drop bank statement PDF(s) here</p>
+        <p class="text-xs text-slate-400 mt-1">Multi-file ingestion with auto-layout detection</p>
+      </div>
+      <button type="button" class="px-3.5 py-1.5 rounded-xl bg-navy-700 hover:bg-navy-600 text-slate-200 text-xs font-medium border border-navy-600">
+        Browse Files
+      </button>
+    </div>
+
+    <!-- Optional Password in Modal -->
+    <div class="mt-4 pt-3 border-t border-navy-800 flex items-center justify-between gap-3 text-xs">
+      <span class="text-slate-400">Password (if PDF is protected):</span>
+      <input 
+        type="password" 
+        id="modalPasswordInput" 
+        placeholder="e.g. DOB or PAN"
+        class="bg-navy-800 border border-navy-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 w-44"
+      >
+    </div>
+
+    <!-- Progress Indicator inside modal -->
+    <div id="modalProgressContainer" class="hidden mt-4 space-y-2.5 bg-navy-850 p-4 rounded-xl border border-navy-700">
+      <div class="flex items-center justify-between text-xs">
+        <span id="modalProgressStepText" class="font-medium text-slate-300">Extracting transactions...</span>
+        <span id="modalProgressPercent" class="font-mono font-bold text-indigo-400">20%</span>
+      </div>
+      <div class="w-full h-2 bg-navy-700 rounded-full overflow-hidden">
+        <div id="modalProgressBar" class="h-full bg-gradient-to-r from-indigo-500 to-emerald-400 rounded-full transition-all duration-300 w-1/5"></div>
+      </div>
+      <div class="flex items-center gap-2 text-[11px] text-slate-400">
+        <i data-lucide="cpu" class="w-3.5 h-3.5 text-emerald-400"></i>
+        <span id="modalProgressSub">5-Phase Pipeline Active</span>
+      </div>
+    </div>
+
+    <!-- Error banner in modal -->
+    <div id="modalErrorBanner" class="hidden mt-3 p-3 rounded-xl bg-rose-950/50 border border-rose-500/40 text-rose-300 text-xs"></div>
+  </dialog>
+
+  <!-- ================= PASSWORD MODAL FOR PROTECTED PDFS ================= -->
+  <dialog id="passwordModal" aria-labelledby="passwordModalTitle" class="bg-navy-900 border border-navy-700 text-white p-6 rounded-2xl shadow-2xl max-w-md w-full">
+    <div class="flex items-center gap-3 mb-3">
+      <div class="w-9 h-9 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
+        <i data-lucide="lock" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <h2 id="passwordModalTitle" class="text-base font-bold text-white">Password Protected PDF</h2>
+        <p id="passwordModalSubtitle" class="text-xs text-slate-400">Enter PDF password to decrypt & analyze</p>
+      </div>
+    </div>
+
+    <form onsubmit="submitPasswordForm(event)" class="space-y-4">
+      <div>
+        <label for="pdfPasswordInput" class="block text-xs font-medium text-slate-300 mb-1">Decryption Password</label>
+        <div class="relative">
+          <input 
+            type="password" 
+            id="pdfPasswordInput" 
+            required 
+            placeholder="e.g. DOB (DDMMYYYY) or PAN"
+            class="w-full bg-navy-850 border border-navy-700 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-amber-500"
+          >
+          <button type="button" onclick="togglePasswordVisibility()" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200">
+            <i id="passwordToggleIcon" data-lucide="eye" class="w-4 h-4"></i>
+          </button>
+        </div>
+        <p class="text-[10px] text-slate-400 mt-1">Bank statements typically use PAN (e.g. ABCDE1234F) or Date of Birth (DDMMYYYY).</p>
+      </div>
+
+      <div id="passwordErrorMsg" class="hidden text-xs text-rose-400 bg-rose-950/40 border border-rose-800/40 p-2.5 rounded-xl"></div>
+
+      <div class="flex items-center justify-end gap-2 pt-2">
+        <button type="button" onclick="closePasswordModal()" class="px-4 py-2 rounded-xl bg-navy-800 hover:bg-navy-700 text-slate-300 text-xs font-semibold">
+          Cancel
+        </button>
+        <button type="submit" class="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-navy-950 text-xs font-bold shadow-md shadow-amber-500/20">
+          Unlock & Parse
+        </button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ================= CLIENT JAVASCRIPT LOGIC ================= -->
+  <script>
+    // State variables
+    let currentBankScope = "All";
+    let currentTab = "all";
+    let currentPage = 1;
+    let currentLimit = 50;
+    let currentSortBy = "iso_date";
+    let currentSortDir = "desc";
+    let searchDebounceTimer = null;
+    let pendingUploadFiles = [];
+
+    let cashflowChartInstance = null;
+    let categoryChartInstance = null;
+
+    // Initialize application on DOM load
+    document.addEventListener("DOMContentLoaded", () => {
+      lucide.createIcons();
+      loadDashboard();
+    });
+
+    // -------------------------------------------------------------
+    // Dashboard Loader (Clean-State Aware)
+    // -------------------------------------------------------------
+    async function loadDashboard() {
+      try {
+        const url = `/api/dashboard${currentBankScope !== 'All' ? `?bank=${encodeURIComponent(currentBankScope)}` : ''}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error("Failed to load dashboard data");
+        const data = await res.json();
+        
+        if (data.is_empty) {
+          // Show Hero Section, Hide Dashboard
+          document.getElementById("emptyStateHero").classList.remove("hidden");
+          document.getElementById("dashboardView").classList.add("hidden");
+          document.getElementById("navSwitcherContainer").classList.add("hidden");
+          document.getElementById("navSwitcherContainer").classList.remove("flex");
+          
+          // Disable export buttons
+          document.getElementById("btnExcelExport").disabled = true;
+          document.getElementById("btnExcelExport").classList.add("cursor-not-allowed", "opacity-50");
+          document.getElementById("btnJsonExport").disabled = true;
+          document.getElementById("btnJsonExport").classList.add("cursor-not-allowed", "opacity-50");
+        } else {
+          // Hide Hero Section, Show Dashboard
+          document.getElementById("emptyStateHero").classList.add("hidden");
+          document.getElementById("dashboardView").classList.remove("hidden");
+          document.getElementById("navSwitcherContainer").classList.remove("hidden");
+          document.getElementById("navSwitcherContainer").classList.add("flex");
+          
+          // Enable export buttons
+          document.getElementById("btnExcelExport").disabled = false;
+          document.getElementById("btnExcelExport").classList.remove("cursor-not-allowed", "opacity-50");
+          document.getElementById("btnJsonExport").disabled = false;
+          document.getElementById("btnJsonExport").classList.remove("cursor-not-allowed", "opacity-50");
+
+          // Update switcher dropdown with ONLY uploaded statements
+          updateStatementDropdown(data.available_statements, data.selected_bank);
+
+          // Render components
+          renderSidebar(data.insights);
+          renderKpis(data.insights);
+          renderReconciliation(data.insights.reconciliation);
+          renderCharts(data.chart_cashflow, data.chart_categories);
+          updateTabCounts(data.tab_counts);
+          fetchTransactions(1);
+        }
+        
+        lucide.createIcons();
+      } catch (err) {
+        console.error("Dashboard error:", err);
+      }
+    }
+
+    function updateStatementDropdown(statements, selectedBank) {
+      const select = document.getElementById("bankSwitcher");
+      select.innerHTML = "";
+      
+      if (!statements || statements.length === 0) return;
+
+      if (statements.length > 1) {
+        const optAll = document.createElement("option");
+        optAll.value = "All";
+        optAll.textContent = "Consolidated Portfolio (All Accounts)";
+        select.appendChild(optAll);
+      }
+
+      statements.forEach(s => {
+        const opt = document.createElement("option");
+        opt.value = s.bank;
+        opt.textContent = `${s.bank} - ${s.borrower_name || 'Borrower'}`;
+        if (s.bank === selectedBank) opt.selected = true;
+        select.appendChild(opt);
+      });
+
+      if (selectedBank === "All") select.value = "All";
+    }
+
+    function changeStatementScope(bank) {
+      currentBankScope = bank;
+      loadDashboard();
+    }
+
+    // -------------------------------------------------------------
+    // Session Reset
+    // -------------------------------------------------------------
+    async function resetSession() {
+      if (!confirm("Are you sure you want to reset the session? All currently parsed statements and transaction records will be wiped to a clean initial state.")) {
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/reset", { method: "POST" });
+        const result = await res.json();
+        currentBankScope = "All";
+        loadDashboard();
+      } catch (err) {
+        alert(`Reset failed: ${err.message}`);
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Render Sidebar
+    // -------------------------------------------------------------
+    function renderSidebar(insights) {
+      const meta = insights.metadata || {};
+      const abb = insights.abb_metrics || {};
+      const salary = insights.salary_audit || {};
+      const debt = insights.debt_and_emi || {};
+      const cc = insights.cc_stress || {};
+      const bounce = insights.bounce_audit || {};
+
+      document.getElementById("borrowerName").textContent = meta.borrower_name || "—";
+      document.getElementById("accountNo").textContent = `A/C: ${meta.account_no || '—'}`;
+      document.getElementById("branchInfo").textContent = `${meta.branch || '—'} ${meta.sol_id ? '(' + meta.sol_id + ')' : ''}`;
+      document.getElementById("ifscInfo").textContent = meta.ifsc || "—";
+      document.getElementById("accTypeInfo").textContent = meta.account_type || "Savings Account";
+      document.getElementById("periodInfo").textContent = meta.period || "—";
+      document.getElementById("sidebarBankBadge").textContent = meta.bank || "Statement";
+
+      document.getElementById("abbAmount").textContent = `₹ ${Number(abb.overall_abb || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
+      document.getElementById("effectiveBalance").textContent = `₹ ${Number(meta.closing_balance || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
+
+      // Stability score
+      const score = salary.stability_score || 0;
+      document.getElementById("stabilityScoreText").textContent = score;
+      document.getElementById("stabilityScoreCircle").setAttribute("stroke-dasharray", `${score}, 100`);
+      document.getElementById("stabilityGradeBadge").textContent = salary.stability_tier || "Grade A (Prime)";
+      document.getElementById("salaryRunRateText").textContent = salary.salary_run_rate || "₹0";
+      document.getElementById("salaryMonthsCount").textContent = `${salary.credits_count || 0} Credits Tagged`;
+
+      // Employer switch alert
+      document.getElementById("employerSwitchNotes").textContent = salary.switch_notes || "Consistent payroll credits.";
+
+      // CC Stress Card
+      document.getElementById("ccStressMessage").textContent = cc.message || "No significant revolving stress detected.";
+      document.getElementById("jumboDisbursedAmount").textContent = `₹ ${Number(cc.jumbo_disbursed || 0).toLocaleString('en-IN')}`;
+      document.getElementById("ccLiquidatedAmount").textContent = `₹ ${Number(cc.card_debt_settled || 0).toLocaleString('en-IN')}`;
+
+      // Debt & FOIR
+      document.getElementById("monthlyEmiAmount").textContent = `₹ ${Number(debt.monthly_obligations || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}`;
+      document.getElementById("foirRatioBadge").textContent = `${debt.foir_percentage || 0}%`;
+      document.getElementById("activeLendersCountBadge").textContent = `${debt.lenders_count || 0} Active Lenders`;
+
+      const pillsContainer = document.getElementById("lendersListPills");
+      pillsContainer.innerHTML = "";
+      (debt.active_lenders || []).forEach(lender => {
+        const pill = document.createElement("span");
+        pill.className = "px-2 py-0.5 rounded-md bg-navy-800 text-slate-300 text-[10px] border border-navy-700";
+        pill.textContent = lender;
+        pillsContainer.appendChild(pill);
+      });
+
+      // Bounce status
+      document.getElementById("bounceStatusText").textContent = bounce.status_text || "0 Bounces • Clean Repayment";
+      document.getElementById("sidebarBounceCountBadge").textContent = bounce.bounce_count || 0;
+    }
+
+    // -------------------------------------------------------------
+    // Render Top KPI Cards
+    // -------------------------------------------------------------
+    function renderKpis(insights) {
+      const salary = insights.salary_audit || {};
+      const debt = insights.debt_and_emi || {};
+      const trading = insights.stock_and_mf || {};
+      const churn = insights.cc_and_wallet_churn || {};
+      const bounce = insights.bounce_audit || {};
+
+      document.getElementById("kpiSalaryRunRate").textContent = salary.salary_run_rate || "₹0";
+      document.getElementById("kpiEmployerName").textContent = (salary.verified_employers || []).join(" / ") || "No Employer Tagged";
+      document.getElementById("kpiAvgSalary").textContent = `Avg: ₹${Number(salary.avg_monthly_salary || 0).toLocaleString('en-IN')}/mo`;
+
+      document.getElementById("kpiMonthlyObligations").textContent = `₹ ${Number(debt.monthly_obligations || 0).toLocaleString('en-IN', {maximumFractionDigits: 0})} /mo`;
+      document.getElementById("kpiJumboSummary").textContent = `₹ ${Number(debt.jumbo_loans_disbursed || 0).toLocaleString('en-IN')} Jumbo Disbursed`;
+      document.getElementById("kpiMandateCount").textContent = `${debt.lenders_count || 0} Mandates`;
+      document.getElementById("kpiFoirSummary").textContent = `FOIR ~${debt.foir_percentage || 0}%`;
+
+      document.getElementById("kpiStockTotalFlow").textContent = `₹ ${Number(trading.total_trading_flow || 0).toLocaleString('en-IN', {maximumFractionDigits: 0})}`;
+      document.getElementById("kpiAngelInflows").textContent = `Angel: ₹${Number(trading.angel_one_inflows || 0).toLocaleString('en-IN')}`;
+
+      document.getElementById("kpiChurnVolume").textContent = `₹ ${Number(churn.total_churn_volume || 0).toLocaleString('en-IN', {maximumFractionDigits: 0})}`;
+      document.getElementById("kpiCredFlowSummary").textContent = `Out: ₹${Number(churn.cred_outflows || 0).toLocaleString('en-IN')} | In: ₹${Number(churn.cred_inflows || 0).toLocaleString('en-IN')}`;
+
+      document.getElementById("kpiBounceCount").textContent = `${bounce.bounce_count || 0} Bounces`;
+    }
+
+    // -------------------------------------------------------------
+    // Render Reconciliation
+    // -------------------------------------------------------------
+    function renderReconciliation(reconc) {
+      document.getElementById("reconcOpenBal").textContent = `₹ ${Number(reconc.opening_balance || 0).toLocaleString('en-IN')}`;
+      document.getElementById("reconcCredits").textContent = `₹ ${Number(reconc.total_deposits || 0).toLocaleString('en-IN')}`;
+      document.getElementById("reconcDebits").textContent = `₹ ${Number(reconc.total_withdrawals || 0).toLocaleString('en-IN')}`;
+      document.getElementById("reconcCloseBal").textContent = `₹ ${Number(reconc.closing_balance || 0).toLocaleString('en-IN')}`;
+      document.getElementById("reconcTxnCount").textContent = `${reconc.total_transactions || 0} Rows`;
+      document.getElementById("reconcDrCrCount").textContent = `${reconc.dr_count || 0} DR / ${reconc.cr_count || 0} CR`;
+    }
+
+    // -------------------------------------------------------------
+    // Render Interactive Charts (Chart.js)
+    // -------------------------------------------------------------
+    function renderCharts(cashflowData, categoryData) {
+      const ctxCashflow = document.getElementById("cashflowChart").getContext("2d");
+      if (cashflowChartInstance) cashflowChartInstance.destroy();
+
+      cashflowChartInstance = new Chart(ctxCashflow, {
+        type: 'bar',
+        data: {
+          labels: cashflowData.labels || [],
+          datasets: [
+            {
+              label: 'Inflows (Deposits)',
+              data: cashflowData.inflows || [],
+              backgroundColor: 'rgba(16, 185, 129, 0.75)',
+              borderColor: '#10B981',
+              borderRadius: 6,
+              borderWidth: 1
+            },
+            {
+              label: 'Outflows (Withdrawals)',
+              data: cashflowData.outflows || [],
+              backgroundColor: 'rgba(244, 63, 94, 0.75)',
+              borderColor: '#F43F5E',
+              borderRadius: 6,
+              borderWidth: 1
+            },
+            {
+              label: 'Net Cashflow',
+              data: cashflowData.net || [],
+              type: 'line',
+              borderColor: '#818CF8',
+              backgroundColor: 'rgba(129, 140, 248, 0.2)',
+              borderWidth: 2,
+              pointRadius: 3,
+              fill: true,
+              tension: 0.3
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#0F172A',
+              titleColor: '#F8FAFC',
+              bodyColor: '#94A3B8',
+              borderColor: '#334155',
+              borderWidth: 1,
+              callbacks: {
+                label: (ctx) => `${ctx.dataset.label}: ₹ ${Number(ctx.raw).toLocaleString('en-IN')}`
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: 'rgba(51, 65, 85, 0.25)' },
+              ticks: { color: '#94A3B8', font: { family: 'Inter', size: 10 } }
+            },
+            y: {
+              grid: { color: 'rgba(51, 65, 85, 0.25)' },
+              ticks: {
+                color: '#94A3B8',
+                font: { family: 'JetBrains Mono', size: 10 },
+                callback: (val) => `₹${Number(val/1000).toFixed(0)}k`
+              }
+            }
+          }
+        }
+      });
+
+      const ctxCategory = document.getElementById("categoryChart").getContext("2d");
+      if (categoryChartInstance) categoryChartInstance.destroy();
+
+      const catColors = {
+        'GENERAL': '#64748B',
+        'CC_WALLET_CHURN': '#F59E0B',
+        'EMI_LOAN': '#EF4444',
+        'STOCK_TRADING': '#8B5CF6',
+        'SALARY': '#10B981',
+        'BUSINESS_INFLOW': '#06B6D4',
+        'LOAN_DISBURSEMENT': '#EC4899',
+        'BOUNCE_FAILURE': '#DC2626'
+      };
+
+      const bgColors = (categoryData.labels || []).map(l => catColors[l] || '#3B82F6');
+
+      categoryChartInstance = new Chart(ctxCategory, {
+        type: 'doughnut',
+        data: {
+          labels: categoryData.labels || [],
+          datasets: [{
+            data: categoryData.values || [],
+            backgroundColor: bgColors,
+            borderColor: '#0B0F19',
+            borderWidth: 2,
+            hoverOffset: 6
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '68%',
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: {
+                color: '#94A3B8',
+                font: { family: 'Inter', size: 10 },
+                boxWidth: 10,
+                padding: 10
+              }
+            },
+            tooltip: {
+              backgroundColor: '#0F172A',
+              borderColor: '#334155',
+              borderWidth: 1,
+              callbacks: {
+                label: (ctx) => ` ₹ ${Number(ctx.raw).toLocaleString('en-IN')}`
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function updateTabCounts(counts) {
+      if (!counts) return;
+      document.getElementById("tabCountAll").textContent = counts.all || 0;
+      document.getElementById("tabCountSalary").textContent = counts.salary || 0;
+      document.getElementById("tabCountLoans").textContent = counts.loans || 0;
+      document.getElementById("tabCountTrading").textContent = counts.trading || 0;
+      document.getElementById("tabCountChurn").textContent = counts.churn || 0;
+      document.getElementById("tabCountBounce").textContent = counts.bounce || 0;
+    }
+
+    // -------------------------------------------------------------
+    // Tab Switching & Data Table
+    // -------------------------------------------------------------
+    function switchTab(tabName) {
+      currentTab = tabName;
+      document.querySelectorAll(".tab-btn").forEach(btn => {
+        btn.classList.remove("border-indigo-500", "text-white", "bg-navy-900");
+        btn.classList.add("border-transparent", "text-slate-400");
+      });
+      const activeBtn = document.getElementById(`tab-${tabName}`);
+      if (activeBtn) {
+        activeBtn.classList.add("border-indigo-500", "text-white", "bg-navy-900");
+        activeBtn.classList.remove("border-transparent", "text-slate-400");
+      }
+      fetchTransactions(1);
+    }
+
+    function debounceSearch() {
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        fetchTransactions(1);
+      }, 300);
+    }
+
+    function changeSort(col) {
+      if (currentSortBy === col) {
+        currentSortDir = (currentSortDir === "asc") ? "desc" : "asc";
+      } else {
+        currentSortBy = col;
+        currentSortDir = "desc";
+      }
+      fetchTransactions(1);
+    }
+
+    function changePage(delta) {
+      fetchTransactions(currentPage + delta);
+    }
+
+    function resetFilters() {
+      document.getElementById("searchInput").value = "";
+      document.getElementById("startDateInput").value = "";
+      document.getElementById("endDateInput").value = "";
+      document.getElementById("minAmountInput").value = "";
+      document.getElementById("maxAmountInput").value = "";
+      fetchTransactions(1);
+    }
+
+    async function fetchTransactions(page = 1) {
+      currentPage = page;
+      currentLimit = parseInt(document.getElementById("limitSelect").value) || 50;
+
+      const searchVal = document.getElementById("searchInput").value.trim();
+      const startVal = document.getElementById("startDateInput").value;
+      const endVal = document.getElementById("endDateInput").value;
+      const minVal = document.getElementById("minAmountInput").value;
+      const maxVal = document.getElementById("maxAmountInput").value;
+
+      let params = new URLSearchParams({
+        tab: currentTab,
+        page: currentPage,
+        limit: currentLimit,
+        sort_by: currentSortBy,
+        sort_dir: currentSortDir
+      });
+
+      if (currentBankScope !== 'All') params.append('bank', currentBankScope);
+      if (searchVal) params.append('search', searchVal);
+      if (startVal) params.append('start_date', startVal);
+      if (endVal) params.append('end_date', endVal);
+      if (minVal) params.append('min_amount', minVal);
+      if (maxVal) params.append('max_amount', maxVal);
+
+      const tbody = document.getElementById("transactionTableBody");
+      try {
+        const res = await fetch(`/api/transactions?${params.toString()}`);
+        if (!res.ok) throw new Error("Failed to load transactions");
+        const data = await res.json();
+        renderTableRows(data.transactions);
+        updatePagination(data);
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-6 text-center text-rose-400 text-xs">Error loading transactions: ${err.message}</td></tr>`;
+      }
+    }
+
+    function getCategoryBadge(category) {
+      if (!category) return '<span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400">GENERAL</span>';
+      if (category.includes('SALARY')) {
+        return '<span class="px-2 py-0.5 rounded text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">SALARY INFLOW</span>';
+      }
+      if (category.includes('EMI_LOAN')) {
+        return '<span class="px-2 py-0.5 rounded text-[10px] bg-rose-500/20 text-rose-300 border border-rose-500/30 font-semibold">LOAN / EMI</span>';
+      }
+      if (category.includes('LOAN_DISBURSEMENT')) {
+        return '<span class="px-2 py-0.5 rounded text-[10px] bg-pink-500/20 text-pink-300 border border-pink-500/30 font-semibold">DISBURSEMENT</span>';
+      }
+      if (category.includes('STOCK_TRADING')) {
+        return '<span class="px-2 py-0.5 rounded text-[10px] bg-violet-500/20 text-violet-300 border border-violet-500/30 font-semibold">STOCK / MF</span>';
+      }
+      if (category.includes('CC_WALLET_CHURN')) {
+        return '<span class="px-2 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold">CC / WALLET</span>';
+      }
+      if (category.includes('BUSINESS_INFLOW')) {
+        return '<span class="px-2 py-0.5 rounded text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 font-semibold">CLIENT DEPOSIT</span>';
+      }
+      if (category.includes('BOUNCE_FAILURE')) {
+        return '<span class="px-2 py-0.5 rounded text-[10px] bg-red-600 text-white font-bold animate-pulse">BOUNCE ALERT</span>';
+      }
+      return '<span class="px-2 py-0.5 rounded text-[10px] bg-navy-800 text-slate-400 border border-navy-700">GENERAL</span>';
+    }
+
+    function renderTableRows(txns) {
+      const tbody = document.getElementById("transactionTableBody");
+      if (!txns || txns.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="px-4 py-8 text-center text-slate-400 text-xs">No transactions match the selected filters.</td></tr>`;
+        return;
+      }
+
+      let html = "";
+      txns.forEach(t => {
+        const isCredit = (t.credit && t.credit > 0);
+        const isDebit = (t.debit && t.debit > 0);
+
+        html += `
+          <tr class="hover:bg-navy-800/50 transition border-b border-navy-800">
+            <td class="px-4 py-2.5 font-mono text-slate-300">${t.txn_date || ''}</td>
+            <td class="px-3 py-2.5 text-slate-400 font-medium">
+              <span class="px-1.5 py-0.5 rounded text-[10px] bg-navy-850 border border-navy-700 text-slate-300">${t.bank || ''}</span>
+            </td>
+            <td class="px-4 py-2.5 font-medium text-slate-200 max-w-md truncate" title="${t.narration || ''}">
+              ${t.narration || ''}
+            </td>
+            <td class="px-3 py-2.5 text-center">
+              ${getCategoryBadge(t.category)}
+            </td>
+            <td class="px-4 py-2.5 text-right font-mono font-medium ${isDebit ? 'text-rose-400' : 'text-slate-600'}">
+              ${isDebit ? `₹ ${Number(t.debit).toLocaleString('en-IN', {minimumFractionDigits: 2})}` : '-'}
+            </td>
+            <td class="px-4 py-2.5 text-right font-mono font-medium ${isCredit ? 'text-emerald-400 font-bold' : 'text-slate-600'}">
+              ${isCredit ? `₹ ${Number(t.credit).toLocaleString('en-IN', {minimumFractionDigits: 2})}` : '-'}
+            </td>
+            <td class="px-4 py-2.5 text-right font-mono font-medium text-slate-300">
+              ₹ ${Number(t.balance || 0).toLocaleString('en-IN', {minimumFractionDigits: 2})}
+            </td>
+          </tr>
+        `;
+      });
+      tbody.innerHTML = html;
+    }
+
+    function updatePagination(data) {
+      const total = data.total || 0;
+      const page = data.page || 1;
+      const limit = data.limit || 50;
+      const totalPages = data.total_pages || 1;
+
+      const start = total === 0 ? 0 : (page - 1) * limit + 1;
+      const end = Math.min(page * limit, total);
+
+      document.getElementById("showingStart").textContent = start;
+      document.getElementById("showingEnd").textContent = end;
+      document.getElementById("showingTotal").textContent = total.toLocaleString();
+
+      document.getElementById("pageIndicator").textContent = `Page ${page} of ${totalPages}`;
+      document.getElementById("prevPageBtn").disabled = (page <= 1);
+      document.getElementById("nextPageBtn").disabled = (page >= totalPages);
+    }
+
+    // -------------------------------------------------------------
+    // Export Downloads
+    // -------------------------------------------------------------
+    function downloadExcel() {
+      const bankParam = currentBankScope !== 'All' ? `?bank=${encodeURIComponent(currentBankScope)}` : '';
+      window.location.href = `/api/export/excel${bankParam}`;
+    }
+
+    function downloadJSON() {
+      const bankParam = currentBankScope !== 'All' ? `?bank=${encodeURIComponent(currentBankScope)}` : '';
+      window.location.href = `/api/export/json${bankParam}`;
+    }
+
+    function copyAccountNo() {
+      const text = document.getElementById("accountNo").textContent.replace("A/C:", "").trim();
+      navigator.clipboard.writeText(text);
+      alert(`Account number copied: ${text}`);
+    }
+
+    // -------------------------------------------------------------
+    // Unified Ingestion Pipeline (5-Phase Progress)
+    // -------------------------------------------------------------
+    async function executeIngestion(filesList, password = null, isHero = true) {
+      const files = Array.from(filesList);
+      if (files.length === 0) return;
+      pendingUploadFiles = files;
+
+      const progressContainer = isHero ? document.getElementById("heroProgressContainer") : document.getElementById("modalProgressContainer");
+      const progressBar = isHero ? document.getElementById("heroProgressBar") : document.getElementById("modalProgressBar");
+      const stepText = isHero ? document.getElementById("heroProgressStepText") : document.getElementById("modalProgressStepText");
+      const percentText = isHero ? document.getElementById("heroProgressPercent") : document.getElementById("modalProgressPercent");
+      const errorBanner = isHero ? document.getElementById("heroErrorBanner") : document.getElementById("modalErrorBanner");
+
+      errorBanner.classList.add("hidden");
+      progressContainer.classList.remove("hidden");
+
+      // Phase 1: Ingestion & Byte Analysis
+      stepText.textContent = "Phase 1/5: Ingesting statement stream & checking encryption...";
+      progressBar.style.width = "20%";
+      percentText.textContent = "20%";
+
+      const formData = new FormData();
+      files.forEach(f => formData.append("files", f));
+      if (password) formData.append("password", password);
+
+      try {
+        // Phase 2: Auto-Layout Detection Engine
+        setTimeout(() => {
+          stepText.textContent = "Phase 2/5: Auto-detecting layout (10-col Federal vs 7-col HDFC format)...";
+          progressBar.style.width = "40%";
+          percentText.textContent = "40%";
+        }, 300);
+
+        // Phase 3: Table Extraction
+        setTimeout(() => {
+          stepText.textContent = "Phase 3/5: Extracting transactions & stripping repeating page headers...";
+          progressBar.style.width = "65%";
+          percentText.textContent = "65%";
+        }, 700);
+
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData
+        });
+
+        const result = await res.json();
+
+        if (result.needs_password) {
+          progressContainer.classList.add("hidden");
+          if (!isHero) closeUploadModal();
+          openPasswordModal(result.detected_bank, result.filename);
+          return;
+        }
+
+        if (!result.success) {
+          throw new Error(result.detail || result.error || "Parsing failed");
+        }
+
+        // Phase 4: Underwriting Engine
+        stepText.textContent = "Phase 4/5: Running credit underwriting rules & salary stability audit...";
+        progressBar.style.width = "85%";
+        percentText.textContent = "85%";
+
+        // Phase 5: Balance Continuity
+        setTimeout(() => {
+          stepText.textContent = `Phase 5/5: Verified balance reconciliation across ${result.total_parsed} transactions!`;
+          progressBar.style.width = "100%";
+          percentText.textContent = "100%";
+        }, 300);
+
+        setTimeout(() => {
+          progressContainer.classList.add("hidden");
+          if (!isHero) closeUploadModal();
+          loadDashboard();
+        }, 750);
+
+      } catch (err) {
+        progressContainer.classList.add("hidden");
+        errorBanner.textContent = err.message;
+        errorBanner.classList.remove("hidden");
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Hero Dropzone Handlers
+    // -------------------------------------------------------------
+    function handleHeroDragOver(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById("heroDropZone").classList.add("border-indigo-400", "bg-navy-800");
+    }
+
+    function handleHeroDragLeave(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById("heroDropZone").classList.remove("border-indigo-400", "bg-navy-800");
+    }
+
+    function handleHeroFileDrop(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById("heroDropZone").classList.remove("border-indigo-400", "bg-navy-800");
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        const pwd = document.getElementById("heroPasswordInput").value.trim() || null;
+        executeIngestion(e.dataTransfer.files, pwd, true);
+      }
+    }
+
+    function handleHeroFileSelect(e) {
+      if (e.target.files && e.target.files.length > 0) {
+        const pwd = document.getElementById("heroPasswordInput").value.trim() || null;
+        executeIngestion(e.target.files, pwd, true);
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Modal Dropzone Handlers
+    // -------------------------------------------------------------
+    const uploadModal = document.getElementById("uploadModal");
+    const passwordModal = document.getElementById("passwordModal");
+
+    function openUploadModal() {
+      uploadModal.showModal();
+    }
+
+    function closeUploadModal() {
+      uploadModal.close();
+      document.getElementById("modalProgressContainer").classList.add("hidden");
+      document.getElementById("modalErrorBanner").classList.add("hidden");
+    }
+
+    function handleModalDragOver(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById("modalDropZone").classList.add("border-indigo-400", "bg-navy-800");
+    }
+
+    function handleModalDragLeave(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById("modalDropZone").classList.remove("border-indigo-400", "bg-navy-800");
+    }
+
+    function handleModalFileDrop(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      document.getElementById("modalDropZone").classList.remove("border-indigo-400", "bg-navy-800");
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        const pwd = document.getElementById("modalPasswordInput").value.trim() || null;
+        executeIngestion(e.dataTransfer.files, pwd, false);
+      }
+    }
+
+    function handleModalFileSelected(e) {
+      if (e.target.files && e.target.files.length > 0) {
+        const pwd = document.getElementById("modalPasswordInput").value.trim() || null;
+        executeIngestion(e.target.files, pwd, false);
+      }
+    }
+
+    // -------------------------------------------------------------
+    // Password Modal Handler
+    // -------------------------------------------------------------
+    function openPasswordModal(bankName, fileName) {
+      document.getElementById("passwordModalSubtitle").textContent = `${bankName} (${fileName})`;
+      document.getElementById("pdfPasswordInput").value = "";
+      document.getElementById("passwordErrorMsg").classList.add("hidden");
+      passwordModal.showModal();
+    }
+
+    function closePasswordModal() {
+      passwordModal.close();
+    }
+
+    function togglePasswordVisibility() {
+      const input = document.getElementById("pdfPasswordInput");
+      const icon = document.getElementById("passwordToggleIcon");
+      if (input.type === "password") {
+        input.type = "text";
+        icon.setAttribute("data-lucide", "eye-off");
+      } else {
+        input.type = "password";
+        icon.setAttribute("data-lucide", "eye");
+      }
+      lucide.createIcons();
+    }
+
+    async function submitPasswordForm(e) {
+      e.preventDefault();
+      const pwd = document.getElementById("pdfPasswordInput").value;
+      if (!pendingUploadFiles || pendingUploadFiles.length === 0) return;
+
+      closePasswordModal();
+      await executeIngestion(pendingUploadFiles, pwd, document.getElementById("dashboardView").classList.contains("hidden"));
+    }
+  </script>
+</body>
+</html>
