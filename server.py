@@ -20,24 +20,44 @@ from analyzer_engine import (
     init_db,
     clear_db,
     detect_bank_format,
+    diagnose_pdf,
     parse_federal_pdf,
     parse_hdfc_pdf,
     parse_axis_pdf,
     parse_idfc_pdf,
     parse_sbi_pdf,
+    parse_icici_pdf,
+    parse_standard_chartered_pdf,
+    parse_universal_pdf,
     compute_underwriting_insights,
     save_statement_to_db,
+    tag_recurring_salary,
     clean_amount
 )
 from export_service import create_excel_report, create_los_json
 
+# Load .env automatically if present
+_env_path = os.path.join(os.path.dirname(__file__), ".env")
+if os.path.exists(_env_path):
+    try:
+        with open(_env_path, "r", encoding="utf-8") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _v = _line.split("=", 1)
+                    _k = _k.strip()
+                    _v = _v.strip().strip('"').strip("'")
+                    if _k and _v and _k not in os.environ:
+                        os.environ[_k] = _v
+    except Exception:
+        pass
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # App start hote hi table schema verify/create karega
     init_db()
     yield
 
-app = FastAPI(title="FinTech Bank Statement Analyzer & Underwriting Suite", version="2.6", lifespan=lifespan)
+app = FastAPI(title="FinTech Bank Statement Analyzer & Underwriting Suite", version="3.1", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -56,10 +76,16 @@ os.makedirs(TEMPLATES_DIR, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+def get_db_conn():
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout=5000;")
+    return conn
+
 @app.get("/api/statements")
 def get_statements():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_db_conn()
     c = conn.cursor()
     c.execute("SELECT * FROM statements ORDER BY id ASC")
     stmts = [dict(r) for r in c.fetchall()]
@@ -68,12 +94,11 @@ def get_statements():
 
 @app.get("/api/dashboard")
 def get_dashboard(bank: Optional[str] = None):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_db_conn()
     c = conn.cursor()
     
     if bank and str(bank).lower() != 'all':
-        c.execute("SELECT * FROM statements WHERE bank = ?", (bank,))
+        c.execute("SELECT * FROM statements WHERE bank = ? OR account_no = ?", (bank, bank))
     else:
         c.execute("SELECT * FROM statements ORDER BY id ASC")
     stmts = [dict(r) for r in c.fetchall()]
@@ -82,7 +107,7 @@ def get_dashboard(bank: Optional[str] = None):
     all_stmts = [dict(r) for r in c.fetchall()]
     
     if bank and str(bank).lower() != 'all':
-        c.execute("SELECT * FROM transactions WHERE bank = ? ORDER BY iso_date DESC, id DESC", (bank,))
+        c.execute("SELECT * FROM transactions WHERE bank = ? OR account_no = ? ORDER BY iso_date DESC, id DESC", (bank, bank))
     else:
         c.execute("SELECT * FROM transactions ORDER BY iso_date DESC, id DESC")
     txns = [dict(r) for r in c.fetchall()]
@@ -275,16 +300,15 @@ def get_transactions(
     page: int = 1,
     limit: int = 50
 ):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_db_conn()
     c = conn.cursor()
     
     where_clauses = []
     params = []
     
     if bank and str(bank).lower() != 'all':
-        where_clauses.append("bank = ?")
-        params.append(bank)
+        where_clauses.append("(bank = ? OR account_no = ?)")
+        params.extend([bank, bank])
         
     if tab == "salary":
         where_clauses.append("(category LIKE '%SALARY%' OR category LIKE '%BUSINESS_INFLOW%')")
@@ -355,12 +379,10 @@ def reset_session():
 
 @app.post("/api/upload")
 async def upload_statement(
-    request: Request,
     file: Optional[UploadFile] = File(None),
     files: Optional[list[UploadFile]] = File(None),
     password: Optional[str] = Form(None)
 ):
-    # Har tarah ke input (file, files, multipart list) ko universally capture karega
     uploaded_files = []
     
     if files:
@@ -389,6 +411,7 @@ async def upload_statement(
         
     try:
         ingested_statements = []
+        failed_info = []
         total_parsed_rows = 0
         
         for upload_item in uploaded_files:
@@ -416,32 +439,34 @@ async def upload_statement(
                 
             bank_name = detection.get("detected_bank", "Generic")
             
-            # Direct routing based on detected bank
+            # Router matching
             if "Federal" in bank_name:
                 records, metadata = parse_federal_pdf(content, password=password)
+            elif "SBI" in bank_name or "STATE BANK" in bank_name:
+                records, metadata = parse_sbi_pdf(content, password=password)
             elif "Axis" in bank_name:
                 records, metadata = parse_axis_pdf(content, password=password)
             elif "HDFC" in bank_name:
                 records, metadata = parse_hdfc_pdf(content, password=password)
             elif "IDFC" in bank_name:
                 records, metadata = parse_idfc_pdf(content, password=password)
-            elif "SBI" in bank_name:
-                records, metadata = parse_sbi_pdf(content, password=password)
+            elif "ICICI" in bank_name:
+                records, metadata = parse_icici_pdf(content, password=password)
+            elif "Standard Chartered" in bank_name:
+                records, metadata = parse_standard_chartered_pdf(content, password=password)
             else:
-                # Systematic fallback order
-                records, metadata = parse_hdfc_pdf(content, password=password)
-                if not records:
-                    records, metadata = parse_axis_pdf(content, password=password)
-                if not records:
-                    records, metadata = parse_sbi_pdf(content, password=password)
-                if not records:
-                    records, metadata = parse_federal_pdf(content, password=password)
-                if not records:
-                    records, metadata = parse_idfc_pdf(content, password=password)
-                    
+                records, metadata = parse_universal_pdf(content, password=password, detected_bank=bank_name)
+
             if not records:
+                records, metadata = parse_universal_pdf(content, password=password, detected_bank=bank_name)
+
+            if not records:
+                diag = diagnose_pdf(content, password=password)
+                print(f"[UPLOAD] no rows parsed from '{filename}' | bank={bank_name} | diag={diag}", flush=True)
+                failed_info.append({"file": filename, "bank": bank_name, **diag})
                 continue
                 
+            records = tag_recurring_salary(records)
             insights = compute_underwriting_insights(records, metadata)
             save_statement_to_db(records, metadata, insights, filename=filename)
             
@@ -456,7 +481,14 @@ async def upload_statement(
             })
             
         if not ingested_statements:
-            raise HTTPException(status_code=400, detail="Could not extract tabular transactions from uploaded statement.")
+            hint = ""
+            if failed_info:
+                f0 = failed_info[0]
+                if f0.get("looks_scanned"):
+                    hint = " (PDF scanned/image jaisa lag raha hai, text nahi mila - OCR chahiye)"
+                else:
+                    hint = f" [bank detected: {f0.get('bank')}, pages: {f0.get('pages')}, date-like lines: {f0.get('date_like_lines')}]"
+            raise HTTPException(status_code=400, detail="Could not extract tabular transactions from uploaded statement." + hint)
             
         return {
             "success": True,
@@ -468,23 +500,20 @@ async def upload_statement(
         }
         
     except HTTPException:
-        # Agar koi 400 Bad Request ya Validation error hai toh wo direct pass hoga (500 nahi banega)
         raise
     except Exception as e:
-        # Baki koi actual Python crash ya error ho toh hi 500 error banega
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Processing failed: {str(e)}")
 
 @app.get("/api/export/excel")
 def export_excel(bank: Optional[str] = None):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_db_conn()
     c = conn.cursor()
     
     if bank and str(bank).lower() != 'all':
-        c.execute("SELECT * FROM statements WHERE bank = ?", (bank,))
+        c.execute("SELECT * FROM statements WHERE bank = ? OR account_no = ?", (bank, bank))
         stmts = [dict(r) for r in c.fetchall()]
-        c.execute("SELECT * FROM transactions WHERE bank = ? ORDER BY iso_date DESC, id DESC", (bank,))
+        c.execute("SELECT * FROM transactions WHERE bank = ? OR account_no = ? ORDER BY iso_date DESC, id DESC", (bank, bank))
         txns = [dict(r) for r in c.fetchall()]
     else:
         c.execute("SELECT * FROM statements ORDER BY id ASC")
@@ -528,14 +557,13 @@ def export_excel(bank: Optional[str] = None):
 
 @app.get("/api/export/json")
 def export_json(bank: Optional[str] = None):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_db_conn()
     c = conn.cursor()
     
     if bank and str(bank).lower() != 'all':
-        c.execute("SELECT * FROM statements WHERE bank = ?", (bank,))
+        c.execute("SELECT * FROM statements WHERE bank = ? OR account_no = ?", (bank, bank))
         stmts = [dict(r) for r in c.fetchall()]
-        c.execute("SELECT * FROM transactions WHERE bank = ? ORDER BY iso_date DESC, id DESC", (bank,))
+        c.execute("SELECT * FROM transactions WHERE bank = ? OR account_no = ? ORDER BY iso_date DESC, id DESC", (bank, bank))
         txns = [dict(r) for r in c.fetchall()]
     else:
         c.execute("SELECT * FROM statements ORDER BY id ASC")
@@ -587,4 +615,26 @@ def index_page():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("server:app", host="127.0.0.1", port=8000, reload=True)
+    import argparse
+
+    parser = argparse.ArgumentParser(description="FinTech Bank Statement Analyzer Server")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)), help="Port to run server on (default 8000)")
+    parser.add_argument("--host", type=str, default=os.environ.get("HOST", "0.0.0.0"), help="Host to listen on (default 0.0.0.0)")
+    parser.add_argument("--reload", action="store_true", default=False, help="Enable auto-reload (default: False)")
+    args, unknown = parser.parse_known_args()
+
+    if unknown and unknown[0].isdigit():
+        args.port = int(unknown[0])
+
+    ai_status = "🟢 ACTIVE (Google GenAI gemini-3.8-flash)" if os.environ.get("GEMINI_API_KEY") else "🟡 Offline Deterministic Engine (Set GEMINI_API_KEY in .env to activate AI)"
+
+    print(f"\n=======================================================", flush=True)
+    print(f"🚀 FinTech Analyzer Server starting on http://{args.host}:{args.port}", flush=True)
+    print(f"📂 Open your browser at: http://{args.host}:{args.port}", flush=True)
+    print(f"🤖 Underwriting AI: {ai_status}", flush=True)
+    print(f"=======================================================\n", flush=True)
+
+    if args.reload:
+        uvicorn.run("server:app", host=args.host, port=args.port, reload=True, reload_excludes=["venv", ".git", "__pycache__"])
+    else:
+        uvicorn.run(app, host=args.host, port=args.port)

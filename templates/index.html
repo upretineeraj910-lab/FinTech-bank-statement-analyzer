@@ -156,7 +156,7 @@
           onclick="document.getElementById('heroFileInput').click()"
           class="border-2 border-dashed border-navy-600 hover:border-indigo-400 rounded-2xl p-8 lg:p-12 text-center cursor-pointer transition-all duration-300 bg-navy-850/60 hover:bg-navy-800/80 space-y-4 group"
         >
-          <input type="file" id="heroFileInput" accept=".pdf" multiple class="hidden" onchange="handleHeroFileSelect(event)">
+          <input type="file" id="heroFileInput" accept=".pdf" class="hidden" onchange="handleHeroFileSelect(event)">
           
           <!-- Cloud Upload Pulse Icon -->
           <div class="w-16 h-16 rounded-2xl bg-indigo-600/10 group-hover:bg-indigo-600/20 text-indigo-400 mx-auto flex items-center justify-center transition shadow-lg shadow-indigo-500/10 group-hover:scale-105">
@@ -165,19 +165,20 @@
 
           <div class="space-y-1.5">
             <h3 class="text-base lg:text-lg font-bold text-white tracking-tight">
-              Drag & Drop Bank Statement PDFs Here
+              Drag & Drop Bank Statement PDF Here
             </h3>
             <p class="text-xs text-slate-400">
-              Select one or multiple statements simultaneously (Federal, HDFC, SBI, ICICI, Axis, IDFC)
+              Universal Multi-Bank Support: HDFC, SBI, ICICI, Axis, Kotak, PNB, Canara, BoB & Any Bank PDF
             </p>
           </div>
 
           <!-- Supported Format Badges -->
           <div class="flex flex-wrap items-center justify-center gap-2 pt-2">
-            <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-navy-800 text-slate-300 border border-navy-700">Federal Bank (10-Col Table)</span>
-            <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-navy-800 text-slate-300 border border-navy-700">HDFC Bank (7-Col Stream)</span>
-            <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-navy-800 text-slate-300 border border-navy-700">SBI Bank Format</span>
-            <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-navy-800 text-slate-300 border border-navy-700">ICICI Bank Format</span>
+            <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-navy-800 text-slate-300 border border-navy-700">HDFC (Table & Stream)</span>
+            <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-navy-800 text-slate-300 border border-navy-700">ICICI Bank</span>
+            <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-navy-800 text-slate-300 border border-navy-700">SBI & Axis</span>
+            <span class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-navy-800 text-slate-300 border border-navy-700">Federal & IDFC</span>
+            <span class="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-indigo-950 text-indigo-300 border border-indigo-700/60">Universal Smart Parser (All Banks)</span>
           </div>
 
           <div class="pt-3">
@@ -761,7 +762,7 @@
         </div>
         <div>
           <h2 id="uploadModalTitle" class="text-base font-bold text-white">Upload Bank Statement</h2>
-          <p class="text-xs text-slate-400">Federal Bank, HDFC Bank, SBI, ICICI (PDF)</p>
+          <p class="text-xs text-slate-400">All Banks: HDFC, SBI, ICICI, Axis, Standard Chartered, Kotak, PNB, Canara & Universal Statement PDF</p>
         </div>
       </div>
       <button onclick="closeUploadModal()" class="text-slate-400 hover:text-white transition">
@@ -778,13 +779,13 @@
       onclick="document.getElementById('modalFileInput').click()"
       class="border-2 border-dashed border-navy-600 hover:border-indigo-500 rounded-2xl p-8 text-center cursor-pointer transition bg-navy-850/60 hover:bg-navy-800/60 space-y-3"
     >
-      <input type="file" id="modalFileInput" accept=".pdf" multiple class="hidden" onchange="handleModalFileSelected(event)">
+      <input type="file" id="modalFileInput" accept=".pdf" class="hidden" onchange="handleModalFileSelected(event)">
       <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 mx-auto flex items-center justify-center">
         <i data-lucide="upload-cloud" class="w-6 h-6"></i>
       </div>
       <div>
-        <p class="text-sm font-semibold text-slate-200">Drag & drop bank statement PDF(s) here</p>
-        <p class="text-xs text-slate-400 mt-1">Multi-file ingestion with auto-layout detection</p>
+        <p class="text-sm font-semibold text-slate-200">Drag & drop bank statement PDF here</p>
+        <p class="text-xs text-slate-400 mt-1">Upload statement PDF (auto-replaces previous statement)</p>
       </div>
       <button type="button" class="px-3.5 py-1.5 rounded-xl bg-navy-700 hover:bg-navy-600 text-slate-200 text-xs font-medium border border-navy-600">
         Browse Files

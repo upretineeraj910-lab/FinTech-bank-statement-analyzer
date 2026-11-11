@@ -14,3 +14,9 @@ bank_statement.db
 *.xlsx
 *.zip
 extracted_statements/
+
+
+# Environment variables
+.env
+.env.local
+.env.*.local

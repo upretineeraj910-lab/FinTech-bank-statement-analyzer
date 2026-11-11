@@ -7,3 +7,5 @@ pymupdf
 pdfplumber
 pypdf
 jinja2
+httpx
+google-genai>=0.1.1
