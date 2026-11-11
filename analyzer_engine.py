@@ -4,7 +4,7 @@ Supports Federal Bank (10-col), HDFC Bank (7-col), Axis Bank (7-col),
 IDFC FIRST Bank (7-col), SBI Bank (8-col), ICICI Bank (7-col), Standard Chartered (7-col),
 and Universal/Generic layouts.
 Features: 100% zero-variance mathematical audit, multiline narration preservation,
-and zero-false-positive categorization engine.
+zero-false-positive categorization, and distinct CC vs Wallet segregation.
 """
 
 import os
@@ -148,13 +148,11 @@ def parse_iso_date(date_str):
     s = str(date_str).split('\n')[0].strip()
     s = re.sub(r'\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?.*$', '', s, flags=re.I).strip()
     
-    # 1. YYYY-MM-DD
     m0 = re.match(r'^(\d{4})-(\d{1,2})-(\d{1,2})$', s)
     if m0:
         y, mo, d = m0.groups()
         return f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
 
-    # 2. DD Mon YYYY or DD-Mon-YYYY or DD/Mon/YYYY
     m1 = re.match(r'^(\d{1,2})[\s\-\/\.]([A-Za-z]{3,9})[\s\-\/\.](\d{2,4})$', s)
     if m1:
         d, mon, y = m1.groups()
@@ -164,7 +162,6 @@ def parse_iso_date(date_str):
             year = f"20{y}" if len(y) == 2 else y
             return f"{int(year):04d}-{mo}-{int(d):02d}"
 
-    # 3. Mon DD, YYYY
     m2 = re.match(r'^([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{2,4})$', s)
     if m2:
         mon, d, y = m2.groups()
@@ -174,7 +171,6 @@ def parse_iso_date(date_str):
             year = f"20{y}" if len(y) == 2 else y
             return f"{int(year):04d}-{mo}-{int(d):02d}"
 
-    # 4. DD/MM/YYYY or DD-MM-YYYY or DD.MM.YYYY or DD/MM/YY
     m3 = re.match(r'^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$', s)
     if m3:
         d, mo, y = m3.groups()
@@ -184,10 +180,6 @@ def parse_iso_date(date_str):
     return s
 
 def extract_dynamic_employer(desc):
-    """
-    Dynamically extracts corporate/employer entity from salary narration
-    without hardcoding any corporate names.
-    """
     d = desc.strip()
     cleaned = re.sub(r'^(?:NEFT|RTGS|IMPS|ACH|CMS|A2A|FT)\s*(?:CR|DR)?\s*[-/:]?\s*[A-Z0-9]{8,25}\s*', '', d, flags=re.IGNORECASE).strip()
     cleaned = re.sub(r'^[A-Z0-9]{10,}\*?', '', cleaned).strip()
@@ -219,13 +211,12 @@ def categorize_transaction(desc, debit=0.0, credit=0.0):
     flags = []
     
     # 1. Genuine Cheque Bounce / Mandate / NACH Failures
-    # (Exclude UPI returns and refund reversals from mandate bounce)
     is_upi = d.startswith("UPI-") or "@" in d
     genuine_bounce_pattern = r'\b(BOUNCE|RET\s*CHG|BOUNCE\s*CHG|INSUFFICIENT|ACH\s*RET|NACH\s*RET|ECS\s*RET|CHQ\s*RET|DISHONOUR|UNPAID)\b'
     if re.search(genuine_bounce_pattern, d) or (not is_upi and re.search(r'\b(RETURN|RET)\b', d) and debit > 0):
         flags.append("BOUNCE_FAILURE")
 
-    # 2. Universal Salary Inflows (Stock Brokers and UPI Pay Requests strictly excluded)
+    # 2. Universal Salary Inflows
     broker_keywords = ['ANGEL', 'ZERODHA', 'GROWW', 'UPSTOX', 'ICCL', 'INDIAN CLEARING', 'NSE', 'BSE', 'SHAREKHAN', 'MOTILAL']
     is_broker = any(b in d for b in broker_keywords)
     
@@ -252,7 +243,7 @@ def categorize_transaction(desc, debit=0.0, credit=0.0):
         flags.append("STOCK_TRADING")
         
     # 4. EMI & Loan Payments vs Disbursements
-    # IMPORTANT: EMI is ALWAYS a DEBIT! Credits can only be Disbursements.
+    # Important: EMI is strictly a DEBIT. Credits can only be Disbursements.
     if "BOUNCE_FAILURE" not in flags and not sip_or_trading:
         # Check Disbursements (Credits)
         if credit >= 10000 and any(k in d for k in ["INSTALOAN", "INSTA LOAN", "INSTAJUMBOLOAN", "JUMBO LOAN", "LOAN DISB", "DISBURSEMENT", "POONAWALLA"]):
@@ -269,28 +260,41 @@ def categorize_transaction(desc, debit=0.0, credit=0.0):
                 any(k in d for k in ["KRAZYBEE", "POONAWALLAFIN", "NORTHERN ARC", "ADITYA BIRLA FINANCE", "MUTHOOT"])
             )
             
-            # Match formal Bajaj Finance, not small merchant QR
+            # Catch HDFC SmartEMI / Masked Card Auto-Billpay EMIs:
+            # e.g., IB BILLPAY DR-HDFC2F-537206XXXXXX1334
+            if re.search(r'IB\s*BILLPAY\s*DR[-_\s]*HDFC', d) and re.search(r'\d{6}X{4,6}\d{4}', d):
+                is_direct_emi = True
+
+            # Standard Clearing Cheque EMI (e.g. EMI 466194268 CHQ)
+            if re.search(r'\bEMI\s+[0-9]+\s+CHQ\b', d):
+                is_direct_emi = True
+
             if "BAJAJ" in d and not is_bajaj_pay_merchant and debit >= 500:
                 is_direct_emi = True
                 
-            # Match bank loan mandates (IDFC, Kotak, HDFC) only if not peer-to-peer UPI
             if ("IDFC" in d or "KMBL" in d or "HDBFS" in d) and any(m in d for m in ["ACH", "NACH", "MANDATE", "LOAN", "DRAOPERATIONS"]) and not is_upi:
                 is_direct_emi = True
 
             if is_direct_emi:
                 flags.append("EMI_LOAN")
         
-    # 5. Credit Card & Wallet Rotation (Exclude small daily merchant QRs)
+    # 5. Distinct Segregation: Credit Card Payments vs Digital Wallet Topups
     cc_keywords = [
         'CRED.CLUB', 'CREDITCARDS@RBL', '@CRED', '@YESCRED', 'CRED WALLET', 'CREDPAY',
-        'CREDIT CARD', 'CC AUTOPAY', 'UPI-LITE', 'MOBIKWIK', 'MBK', 'RUPICARD', 'ZETAWALL',
-        'IBBILLPAYDR.*HDFC', 'CC000', 'RBL BANK CREDIT CARD', 'HDFC BANK DIGITAL CRE',
-        'PZ HDFC CC', 'SBI CARDS', 'CC BILL PAY', 'BIL/INFT'
+        'CREDIT CARD', 'CC AUTOPAY', 'CC000', 'RBL BANK CREDIT CARD', 'HDFC BANK DIGITAL CRE',
+        'PZ HDFC CC', 'SBI CARDS', 'CC BILL PAY', 'BIL/INFT', 'PAYMENT ON CRED'
     ]
+    wallet_keywords = [
+        'UPI-LITE', 'ADD MONEY', 'MOBIKWIK', 'MBK', 'RUPICARD',
+        'ZETAWALL', 'PAYTM WALLET', 'AMAZON PAY WALLET', 'LOAD WALLET'
+    ]
+
     if any(re.search(k, d) for k in cc_keywords):
-        flags.append("CC_WALLET_CHURN")
+        flags.append("CC_PAYMENT")
+    elif any(re.search(k, d) for k in wallet_keywords):
+        flags.append("WALLET_TOPUP")
     elif 'PAYTMQR' in d and debit >= 2000 and any(c in d for c in ['CRED', 'CARD', 'ROTATION', 'WALLET']):
-        flags.append("CC_WALLET_CHURN")
+        flags.append("CC_PAYMENT")
 
     return ", ".join(flags) if flags else "GENERAL"
 
@@ -313,10 +317,6 @@ def _counterparty_key(narr):
     return " ".join(words[:2]) or None
 
 def tag_recurring_salary(records, min_amount=10000, tol=0.35):
-    """
-    Tags recurring corporate payroll credits across months.
-    Excludes brokers, mutual fund settlements, and UPI.
-    """
     excluded_entities = ['ANGEL', 'ZERODHA', 'GROWW', 'UPSTOX', 'ICCL', 'NSE', 'BSE', 'INDIAN CLEARING']
     groups = defaultdict(list)
     for i, r in enumerate(records):
@@ -529,10 +529,6 @@ def parse_standard_chartered_pdf(pdf_source, password=None):
     return records, metadata
 
 def parse_hdfc_pdf(pdf_source, password=None, _raw_lines=False):
-    """
-    Universal Robust Multi-Page HDFC Parser.
-    Filters boilerplate headers/footers to avoid narration bleeding and preserves 0-variance math.
-    """
     metadata = {
         "bank": "HDFC Bank", "borrower_name": "HDFC Account Holder", "account_no": "",
         "branch": "HDFC Branch", "sol_id": "", "ifsc": "HDFC0000000", "cust_id": "", "email": "",
@@ -606,7 +602,6 @@ def parse_hdfc_pdf(pdf_source, password=None, _raw_lines=False):
     except Exception as e:
         print(f"HDFC Metadata error: {e}")
 
-    # High-Precision Coordinate-Aware Extraction with Header Noise Discard
     records = []
     try:
         if isinstance(pdf_source, bytes):
@@ -664,7 +659,6 @@ def parse_hdfc_pdf(pdf_source, password=None, _raw_lines=False):
                 prev_balance = balance
 
                 raw_narr = " ".join(t['narr']).strip()
-                # Post-clean any leaked header tokens
                 cleaned_narr = re.sub(r'(?:BANK\s+LIMITED|Cust\s+\d+|Account\s+A/C|HOLDERS\s*:|RTGS/NEFT|Statement\s*:|Opening\s+Balance|Dr\s+Count\s+[\d,.]+).*$', '', raw_narr, flags=re.I).strip()
                 narration = cleaned_narr if len(cleaned_narr) >= 3 else raw_narr
                 category = categorize_transaction(narration, debit, credit)
@@ -683,7 +677,6 @@ def parse_hdfc_pdf(pdf_source, password=None, _raw_lines=False):
     except Exception as e:
         print(f"HDFC Coordinate Extractor fallback: {e}")
 
-    # Fallback to Text Stream if coordinate extraction didn't produce records
     if not records:
         _pg_date = re.compile(r'^\d{2}/\d{2}/\d{2,4}\b')
 
@@ -1714,9 +1707,8 @@ def run_gemini_underwriting_intelligence(records, metadata):
             d_val = r.get("debit", 0.0)
             narr = r.get("narration", "").upper()
             cat = r.get("category", "")
-            # Strictly exclude clearing corporations and stock brokers from loan candidates
             if d_val >= 200.0 and not any(k in narr for k in ["ICCL", "INDIAN CLEARING", "NSECL", "ZERODHA", "ANGEL"]):
-                if "EMI" in cat or any(k in narr for k in ["ACH", "NACH", "MANDATE", "LOAN", "DRAOPERATIONS", "CAPITAL", "BAJAJ FINANCE", "POONAWALLA", "KRAZYBEE", "NORTHERN ARC", "BIRLA"]):
+                if "EMI" in cat or any(k in narr for k in ["ACH", "NACH", "MANDATE", "LOAN", "DRAOPERATIONS", "CAPITAL", "BAJAJ FINANCE", "POONAWALLA", "KRAZYBEE", "NORTHERN ARC", "BIRLA", "BILLPAY DR-HDFC"]):
                     debit_candidates.append({
                         "id": idx,
                         "date": r.get("txn_date", ""),
@@ -1728,7 +1720,7 @@ def run_gemini_underwriting_intelligence(records, metadata):
         for idx, r in enumerate(records):
             narr = r.get("narration", "").upper()
             cat = r.get("category", "")
-            if "CHURN" in cat or any(k in narr for k in ["CRED", "MOBIKWIK", "RUPICARD", "CARD", "WALLET"]):
+            if "CC_PAYMENT" in cat or "WALLET_TOPUP" in cat or any(k in narr for k in ["CRED", "MOBIKWIK", "RUPICARD", "CARD", "WALLET"]):
                 churn_candidates.append({
                     "id": idx,
                     "date": r.get("txn_date", ""),
@@ -1747,10 +1739,10 @@ def run_gemini_underwriting_intelligence(records, metadata):
         prompt = f"""You are an expert Credit Underwriter and Bank Statement AI Analyzer for Indian retail banking.
 Your task is to analyze these bank statement transaction candidates and return a structured JSON report.
 
-IMPORTANT CONSTRAINTS:
-1. Do NOT classify Indian Clearing Corporation Limited (ICCL), NSE, BSE, or Stock Brokers as Loan Lenders. They are Mutual Fund/Stock investments.
-2. Only classify true institutional lending EMIs (Bajaj Finance, Kotak Mahindra Bank Loan, HDB Financial, IDFC First Bank Loan, etc.).
-3. Identify genuine employers by stripping transaction codes (NEFT, RTGS, IFSC, reference numbers).
+CONSTRAINTS:
+1. Do NOT classify Indian Clearing Corporation Limited (ICCL), NSE, BSE, or Stock Brokers as Loan Lenders.
+2. Classify HDFC masked card auto-billpays (e.g. IB BILLPAY DR-HDFC...537206XXXXXX) and institutional EMIs into active lenders.
+3. Identify genuine employers by stripping prefixes (NEFT, RTGS, IFSC).
 
 TRANSACTION CANDIDATES:
 Credits:
@@ -1762,7 +1754,7 @@ Debits:
 Card/Wallet Flows:
 {json.dumps(churn_payload, indent=2)}
 
-Return ONLY valid JSON matching this schema:
+Return ONLY valid JSON:
 {{
   "salary_intelligence": {{
     "primary_employer_name": "string",
@@ -1797,7 +1789,6 @@ Return ONLY valid JSON matching this schema:
 }}"""
 
         response = None
-        last_err = None
         for target_model in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
             try:
                 response = client.models.generate_content(
@@ -1810,15 +1801,14 @@ Return ONLY valid JSON matching this schema:
                 )
                 if response and response.text:
                     break
-            except Exception as m_err:
-                last_err = m_err
+            except Exception:
                 continue
 
         if response and response.text:
             return json.loads(response.text)
 
     except Exception as e:
-        print(f"[Gemini Underwriting Fallback] Proceeding with deterministic rules: {e}")
+        print(f"[Gemini Underwriting Fallback] {e}")
         return None
 
     return None
@@ -1895,7 +1885,6 @@ def compute_underwriting_insights(records, metadata):
     
     for _, row in loan_df.iterrows():
         narr = row['narration'].upper()
-        # Strictly ensure broker SIPs are never counted as active lenders
         if any(b in narr for b in ["ICCL", "INDIAN CLEARING", "NSECL", "ZERODHA", "ANGEL"]):
             continue
         matched_lender = None
@@ -1903,8 +1892,13 @@ def compute_underwriting_insights(records, metadata):
             if code in narr:
                 matched_lender = formal_name
                 break
-        if not matched_lender and row['debit'] >= 1000:
-            matched_lender = "Financial Institution Mandate"
+        if not matched_lender:
+            if "BILLPAY DR-HDFC" in narr and "XXXXXX" in narr:
+                matched_lender = "HDFC Bank SmartEMI / Card Loan"
+            elif "EMI" in narr and "CHQ" in narr:
+                matched_lender = "Banking Institution Cheque EMI"
+            elif row['debit'] >= 1000:
+                matched_lender = "Financial Institution Mandate"
         if matched_lender and matched_lender not in active_lenders:
             active_lenders.append(matched_lender)
             
@@ -1913,28 +1907,33 @@ def compute_underwriting_insights(records, metadata):
     jumbo_loans = [{"date": r['txn_date'], "narration": r['narration'], "amount": r['credit']} for _, r in disburse_df.iterrows()]
     total_jumbo_disbursed = sum(j['amount'] for j in jumbo_loans)
     trading_df = df[df['category'].str.contains('STOCK_TRADING', na=False)]
-    churn_df = df[df['category'].str.contains('CC_WALLET_CHURN', na=False)]
-    cred_inflows = round(float(churn_df[churn_df['narration'].str.contains(r'@CRED|@YESCRED', case=False, na=False)]['credit'].sum()), 2)
-    cred_outflows = round(float(churn_df[churn_df['narration'].str.contains(r'CRED\.CLUB|CREDPAY|CRED\s*WALLET', case=False, na=False)]['debit'].sum()), 2)
+    
+    # 3. Segregated CC Payments & Wallet Topups
+    cc_df = df[df['category'].str.contains('CC_PAYMENT', na=False)]
+    wallet_df = df[df['category'].str.contains('WALLET_TOPUP', na=False)]
+    cred_inflows = round(float(cc_df[cc_df['narration'].str.contains(r'@CRED|@YESCRED', case=False, na=False)]['credit'].sum()), 2)
+    cred_outflows = round(float(cc_df[cc_df['narration'].str.contains(r'CRED\.CLUB|CREDPAY', case=False, na=False)]['debit'].sum()), 2)
+    
     bounce_df = df[df['category'].str.contains('BOUNCE_FAILURE', na=False)]
     abb_stats = calculate_daily_abb(records, open_bal, close_bal)
     foir_pct = round((monthly_emi_obligations / avg_monthly_salary) * 100, 1) if avg_monthly_salary > 0 else 0.0
 
-    if cred_outflows >= 50000 and total_jumbo_disbursed >= 50000:
+    # Churning & Fraud Logic
+    if cred_outflows >= 50000 and total_jumbo_disbursed >= 50000 and cred_inflows >= 20000:
         risk_tag = "CRITICAL"
         risk_score = 90
         churn_velocity = "HIGH"
-        fraud_reasoning = "High-velocity revolver credit card rotation coupled with simultaneous jumbo personal loan disbursements."
-    elif cred_outflows >= 25000:
+        fraud_reasoning = "High-velocity revolver credit card circular rotation coupled with personal loan disbursements."
+    elif cred_outflows >= 25000 and cred_inflows >= 10000:
         risk_tag = "ELEVATED"
         risk_score = 60
         churn_velocity = "MODERATE"
-        fraud_reasoning = "Elevated volume of credit card repayment and wallet rotations detected."
+        fraud_reasoning = "Elevated volume of circular credit card repayment and wallet rotations detected."
     else:
         risk_tag = "CLEAN"
         risk_score = 10
         churn_velocity = "LOW"
-        fraud_reasoning = "Card transactions reflect normal retail consumer activity without circular fund churning."
+        fraud_reasoning = "Card settlements reflect debt liquidation without circular fund recycling."
 
     # Execute Non-blocking Hybrid AI Layer
     ai_applied = False
@@ -1955,7 +1954,7 @@ def compute_underwriting_insights(records, metadata):
 
         debt_intel = ai_result.get("debt_intelligence", {})
         if debt_intel.get("active_lenders"):
-            ai_lenders = [l.get("clean_lender_name") for l in debt_intel["active_lenders"] if l.get("clean_lender_name") and not any(k in l.get("clean_lender_name").upper() for k in ["ICCL", "CLEARING", "NSE", "STOCK", "CREDIT CARD"])]
+            ai_lenders = [l.get("clean_lender_name") for l in debt_intel["active_lenders"] if l.get("clean_lender_name") and not any(k in l.get("clean_lender_name").upper() for k in ["ICCL", "CLEARING", "NSE", "STOCK"])]
             if ai_lenders:
                 active_lenders = ai_lenders
 
@@ -1969,7 +1968,6 @@ def compute_underwriting_insights(records, metadata):
         if fraud_intel.get("reasoning"):
             fraud_reasoning = fraud_intel["reasoning"]
 
-    # Final Employer Switch Status Calibration
     employer_switch = (len(employers) >= 2)
     if employer_switch:
         switch_notes = f"Multiple employers detected ({', '.join(employers)})."
@@ -2015,11 +2013,11 @@ def compute_underwriting_insights(records, metadata):
             "ai_enabled": ai_applied
         },
         "cc_stress": {
-            "is_alert": (total_jumbo_disbursed >= 50000 and float(churn_df['debit'].sum()) >= 50000),
-            "severity": "CRITICAL" if (total_jumbo_disbursed >= 50000 and float(churn_df['debit'].sum()) >= 50000) else "NORMAL",
-            "message": "High revolver card stress / debt restructuring detected." if (total_jumbo_disbursed >= 50000 and float(churn_df['debit'].sum()) >= 50000) else "Revolving credit cards are within normal operating parameters.",
+            "is_alert": (total_jumbo_disbursed >= 50000 and float(cc_df['debit'].sum()) >= 50000),
+            "severity": "CRITICAL" if (total_jumbo_disbursed >= 50000 and float(cc_df['debit'].sum()) >= 50000) else "NORMAL",
+            "message": "High revolver card stress / debt restructuring detected." if (total_jumbo_disbursed >= 50000 and float(cc_df['debit'].sum()) >= 50000) else "Revolving credit cards are within normal operating parameters.",
             "jumbo_disbursed": total_jumbo_disbursed,
-            "card_debt_settled": round(float(churn_df['debit'].sum()), 2)
+            "card_debt_settled": round(float(cc_df['debit'].sum()), 2)
         },
         "stock_and_mf": {
             "total_trading_flow": round(float(trading_df['credit'].sum() + trading_df['debit'].sum()), 2),
@@ -2031,11 +2029,13 @@ def compute_underwriting_insights(records, metadata):
             "txns_count": len(trading_df)
         },
         "cc_and_wallet_churn": {
-            "total_churn_volume": round(float(churn_df['debit'].sum() + churn_df['credit'].sum()), 2),
+            "total_churn_volume": round(float(cc_df['debit'].sum() + wallet_df['debit'].sum()), 2),
             "cred_inflows": cred_inflows,
             "cred_outflows": cred_outflows,
             "net_cred_rotation": round(cred_outflows - cred_inflows, 2),
-            "txns_count": len(churn_df),
+            "cc_payments_total": round(float(cc_df['debit'].sum()), 2),
+            "wallet_topups_total": round(float(wallet_df['debit'].sum()), 2),
+            "txns_count": len(cc_df) + len(wallet_df),
             "fraud_risk_tag": risk_tag,
             "fraud_reasoning": fraud_reasoning
         },

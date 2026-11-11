@@ -36,7 +36,6 @@ from analyzer_engine import (
 )
 from export_service import create_excel_report, create_los_json
 
-# Load .env automatically if present
 _env_path = os.path.join(os.path.dirname(__file__), ".env")
 if os.path.exists(_env_path):
     try:
@@ -57,7 +56,7 @@ async def lifespan(app: FastAPI):
     init_db()
     yield
 
-app = FastAPI(title="FinTech Bank Statement Analyzer & Underwriting Suite", version="3.1", lifespan=lifespan)
+app = FastAPI(title="FinTech Bank Statement Analyzer & Underwriting Suite", version="3.2", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -189,6 +188,8 @@ def get_dashboard(bank: Optional[str] = None):
                     "cred_inflows": 0.0,
                     "cred_outflows": 0.0,
                     "net_cred_rotation": 0.0,
+                    "cc_payments_total": 0.0,
+                    "wallet_topups_total": 0.0,
                     "txns_count": 0
                 },
                 "bounce_audit": {
@@ -256,12 +257,13 @@ def get_dashboard(bank: Optional[str] = None):
     step = max(1, len(df_sorted) // 40)
     sampled_balance = df_sorted.iloc[::step][['txn_date', 'iso_date', 'balance', 'bank']].to_dict('records')
     
+    # Backward compatible with frontend tab 'churn' while capturing both CC_PAYMENT and WALLET_TOPUP
     tab_counts = {
         "all": len(txns),
         "salary": int(df['category'].str.contains('SALARY|BUSINESS_INFLOW', na=False).sum()),
         "loans": int(df['category'].str.contains('LOAN|EMI', na=False).sum()),
         "trading": int(df['category'].str.contains('STOCK|TRADING', na=False).sum()),
-        "churn": int(df['category'].str.contains('CHURN|CC_WALLET', na=False).sum()),
+        "churn": int(df['category'].str.contains('CC_PAYMENT|WALLET_TOPUP|CC_WALLET_CHURN', na=False).sum()),
         "bounce": int(df['category'].str.contains('BOUNCE', na=False).sum())
     }
     
@@ -316,8 +318,8 @@ def get_transactions(
         where_clauses.append("(category LIKE '%LOAN%' OR category LIKE '%EMI%')")
     elif tab == "trading":
         where_clauses.append("(category LIKE '%STOCK%' OR category LIKE '%TRADING%')")
-    elif tab == "churn":
-        where_clauses.append("(category LIKE '%CHURN%' OR category LIKE '%CC_WALLET%')")
+    elif tab in ("churn", "credit_cards", "wallets"):
+        where_clauses.append("(category LIKE '%CC_PAYMENT%' OR category LIKE '%WALLET_TOPUP%' OR category LIKE '%CC_WALLET_CHURN%')")
     elif tab == "bounce":
         where_clauses.append("category LIKE '%BOUNCE%'")
         
@@ -391,22 +393,6 @@ async def upload_statement(
         uploaded_files.append(file)
         
     if not uploaded_files:
-        try:
-            form = await request.form()
-            for key in form:
-                val = form[key]
-                if isinstance(val, UploadFile) and val.filename:
-                    uploaded_files.append(val)
-                elif isinstance(val, list):
-                    for item in val:
-                        if isinstance(item, UploadFile) and item.filename:
-                            uploaded_files.append(item)
-            if not password and "password" in form and isinstance(form["password"], str):
-                password = form["password"]
-        except Exception:
-            pass
-
-    if not uploaded_files:
         raise HTTPException(status_code=400, detail="No PDF file was provided.")
         
     try:
@@ -418,7 +404,6 @@ async def upload_statement(
             content = await upload_item.read()
             filename = upload_item.filename
             
-            # Detect Bank Layout
             detection = detect_bank_format(file_bytes=content, password=password)
             if detection.get("is_encrypted") and not password:
                 return {
@@ -439,7 +424,6 @@ async def upload_statement(
                 
             bank_name = detection.get("detected_bank", "Generic")
             
-            # Router matching
             if "Federal" in bank_name:
                 records, metadata = parse_federal_pdf(content, password=password)
             elif "SBI" in bank_name or "STATE BANK" in bank_name:
@@ -485,9 +469,9 @@ async def upload_statement(
             if failed_info:
                 f0 = failed_info[0]
                 if f0.get("looks_scanned"):
-                    hint = " (PDF scanned/image jaisa lag raha hai, text nahi mila - OCR chahiye)"
+                    hint = " (PDF scanned image format detected - requires OCR)"
                 else:
-                    hint = f" [bank detected: {f0.get('bank')}, pages: {f0.get('pages')}, date-like lines: {f0.get('date_like_lines')}]"
+                    hint = f" [bank detected: {f0.get('bank')}, pages: {f0.get('pages')}]"
             raise HTTPException(status_code=400, detail="Could not extract tabular transactions from uploaded statement." + hint)
             
         return {
@@ -618,20 +602,17 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="FinTech Bank Statement Analyzer Server")
-    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)), help="Port to run server on (default 8000)")
-    parser.add_argument("--host", type=str, default=os.environ.get("HOST", "0.0.0.0"), help="Host to listen on (default 0.0.0.0)")
-    parser.add_argument("--reload", action="store_true", default=False, help="Enable auto-reload (default: False)")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)), help="Port to run server on")
+    parser.add_argument("--host", type=str, default=os.environ.get("HOST", "0.0.0.0"), help="Host to listen on")
+    parser.add_argument("--reload", action="store_true", default=False, help="Enable auto-reload")
     args, unknown = parser.parse_known_args()
 
     if unknown and unknown[0].isdigit():
         args.port = int(unknown[0])
 
-    ai_status = "🟢 ACTIVE (Google GenAI gemini-3.8-flash)" if os.environ.get("GEMINI_API_KEY") else "🟡 Offline Deterministic Engine (Set GEMINI_API_KEY in .env to activate AI)"
-
     print(f"\n=======================================================", flush=True)
     print(f"🚀 FinTech Analyzer Server starting on http://{args.host}:{args.port}", flush=True)
     print(f"📂 Open your browser at: http://{args.host}:{args.port}", flush=True)
-    print(f"🤖 Underwriting AI: {ai_status}", flush=True)
     print(f"=======================================================\n", flush=True)
 
     if args.reload:
