@@ -1490,6 +1490,127 @@ def parse_universal_pdf(pdf_source, password=None, detected_bank=None):
 
 
 # --------------------------------------------------------------------------------------
+# Last-resort parser: rebuilds text lines from word positions (works when table detection finds nothing)
+# --------------------------------------------------------------------------------------
+
+_AMT_TOKEN = re.compile(r'^\(?-?[\d,]+\.\d{2}\)?(?:CR|DR)?$', re.I)
+_BF_MARKERS = ("BALANCE FORWARD", "BROUGHT FORWARD", "OPENING BALANCE", "B/F")
+_HEADER_WORDS = ("DATE", "BALANCE", "NARRATION", "REMARKS", "PARTICULARS", "DEBIT", "CREDIT", "WITHDRAWAL", "DEPOSIT", "CHEQUE")
+
+
+def _trailing_amounts(texts):
+    out = []
+    for t in reversed(texts):
+        if _AMT_TOKEN.match(t):
+            out.insert(0, t)
+        else:
+            break
+    return out
+
+
+def _pick_amount(trailing):
+    """trailing = [..., debit?, credit?, balance]. Returns the transaction amount (the non-zero one)."""
+    cands = [abs(clean_amount(t)) for t in trailing[:-1]][-2:]
+    nonzero = [c for c in cands if c > 0]
+    if len(nonzero) == 1:
+        return nonzero[0]
+    return cands[-1] if cands else None
+
+
+def _is_header_line(upper_text):
+    return sum(1 for w in _HEADER_WORDS if w in upper_text) >= 2
+
+
+def parse_text_lines_pdf(pdf_source, password=None, detected_bank=None):
+    """
+    Bank-agnostic fallback. A transaction line starts with a date; the last amounts on the line are
+    [debit], [credit], balance. Direction comes from the balance movement (same gap detection as the
+    other balance-driven parsers), so a wrong parse shows up as parse_gaps / non-reconciliation
+    instead of passing silently.
+    """
+    metadata = _new_metadata(detected_bank or "General Bank Statement", "Account Holder", "Main Branch", "",
+                             "Savings / Current Account")
+    raw, gaps, opening_known, narr_left = [], 0, False, None
+    cur = None
+
+    def flush():
+        nonlocal cur, gaps
+        if cur is None:
+            return
+        if cur["bal"] is None:
+            gaps += 1
+        else:
+            raw.append({"date": cur["date"], "narration": re.sub(r'\s+', ' ', " ".join(cur["narr"])).strip(),
+                        "amt": cur["amt"], "balance": cur["bal"]})
+        cur = None
+
+    doc = _open_doc(pdf_source, password)
+    try:
+        for pno, page in enumerate(doc):
+            if pno == 0:
+                p0 = page.get_text()
+                m = re.search(r'(?:Account|A/C|Acct)\s*(?:Number|No\.?|#)?\s*[:\.\-]?\s*([0-9]{9,18})', p0, re.I)
+                if m:
+                    metadata["account_no"] = m.group(1)
+                m = re.search(r'IFSC\s*(?:CODE)?\s*[:\.]?\s*([A-Za-z]{4}0[A-Za-z0-9]{6})', p0, re.I)
+                if m:
+                    metadata["ifsc"] = m.group(1).upper()
+
+            lines = []
+            for w in sorted(page.get_text("words"), key=lambda w: (w[1], w[0])):
+                if lines and abs(w[1] - lines[-1][0]) <= 3:
+                    lines[-1][1].append(w)
+                else:
+                    lines.append([w[1], [w]])
+
+            for _, lw in lines:
+                lw = sorted(lw, key=lambda w: w[0])
+                texts = [w[4] for w in lw]
+                up = " ".join(texts).upper()
+                date_idx = next((i for i, t in enumerate(texts[:4]) if is_date(t)), None)
+
+                if date_idx is not None and not _is_header_line(up):
+                    flush()
+                    j = date_idx
+                    while j < len(texts) and is_date(texts[j]):
+                        j += 1
+                    trailing = _trailing_amounts(texts[j:])
+                    narr = texts[j:len(texts) - len(trailing)] if trailing else texts[j:]
+                    if narr and narr_left is None:
+                        narr_left = lw[j][0]
+                    cur = {"date": texts[date_idx], "narr": narr, "amt": None, "bal": None}
+                    if trailing:
+                        cur["bal"] = clean_amount(trailing[-1], True)
+                        cur["amt"] = _pick_amount(trailing) if len(trailing) >= 2 else None
+                    continue
+
+                trailing = _trailing_amounts(texts)
+                if any(k in up for k in _BF_MARKERS) and trailing:
+                    if not opening_known and not raw and cur is None:
+                        metadata["opening_balance"] = clean_amount(trailing[-1], True)
+                        opening_known = True
+                    continue
+                if cur is None or _is_noise_row(up) or _is_header_line(up):
+                    continue
+                if narr_left is not None and lw[0][0] < narr_left - 3:
+                    continue                      # margin text (page footer etc.), not part of the narration column
+                if cur["bal"] is None and len(trailing) >= 2:
+                    cur["bal"] = clean_amount(trailing[-1], True)
+                    cur["amt"] = _pick_amount(trailing)
+                    cur["narr"] += texts[:len(texts) - len(trailing)]
+                elif not trailing:
+                    cur["narr"] += texts
+        flush()
+    finally:
+        doc.close()
+
+    metadata["parse_gaps"] = gaps
+    records = _derive_rows_from_balances(raw, metadata, metadata["bank"], opening_known)
+    _finalize_metadata(metadata, records, from_first_row=False)
+    return records, metadata
+
+
+# --------------------------------------------------------------------------------------
 # Reconciliation + parser orchestration
 # --------------------------------------------------------------------------------------
 
@@ -1549,6 +1670,7 @@ def parse_statement(content, password=None, detection=None):
     if primary:
         attempts.append((primary.__name__, lambda: primary(content, password=password)))
     attempts.append(("parse_universal_pdf", lambda: parse_universal_pdf(content, password=password, detected_bank=bank_name)))
+    attempts.append(("parse_text_lines_pdf", lambda: parse_text_lines_pdf(content, password=password, detected_bank=bank_name)))
 
     best = None
     for name, fn in attempts:
@@ -1693,7 +1815,7 @@ Return ONLY JSON:
   "active_lenders": [{{"raw_code": "string", "clean_lender_name": "string"}}],
   "risk_tag": "CLEAN|ELEVATED|CRITICAL", "risk_score": 0, "churn_velocity": "LOW|MODERATE|HIGH", "reasoning": "string"}}"""
 
-        models = [m for m in os.environ.get("GEMINI_MODELS", "gemini-2.5-flash,gemini-2.0-flash").split(",") if m.strip()]
+        models = [m for m in os.environ.get("GEMINI_MODELS", "gemini-3.8-flash,gemini-2.0-flash").split(",") if m.strip()]
         for model in models:
             try:
                 resp = client.models.generate_content(

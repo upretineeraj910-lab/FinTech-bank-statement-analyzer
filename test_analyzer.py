@@ -202,3 +202,57 @@ def test_old_schema_migrates():
         with closing(sqlite3.connect(db)) as c:
             cols = {r[1] for r in c.execute("PRAGMA table_info(transactions)")}
         assert {"case_id", "statement_id", "iso_date"} <= cols
+
+
+# ---------------- line-based fallback parser (PDF with no usable table) ----------------
+def _wide_pdf(rows, opening, reverse=False):
+    import pymupdf
+    doc = pymupdf.open()
+    page = doc.new_page(width=1000, height=842)
+    page.insert_text((40, 30), "Page 1 of 2", fontsize=8)                      # margin text before the table
+    y = 60
+    for x, t in [(40, "S No."), (80, "Value Date"), (150, "Transaction Date"), (330, "Transaction Remarks"),
+                 (700, "Withdrawal"), (780, "Deposit"), (850, "Balance")]:
+        page.insert_text((x, y), t, fontsize=8)
+    y += 14
+    bal, built = opening, []
+    for i, (d, narr, dr, cr) in enumerate(rows, 1):
+        bal = round(bal - dr + cr, 2)
+        built.append((i, d, narr, dr, cr, bal))
+    for i, d, narr, dr, cr, bal in (built[::-1] if reverse else built):
+        page.insert_text((40, y), str(i), fontsize=8)
+        page.insert_text((80, y), d, fontsize=8)
+        page.insert_text((150, y), d, fontsize=8)
+        page.insert_text((330, y), narr[0], fontsize=8)
+        page.insert_text((700, y), f"{dr:,.2f}", fontsize=8)
+        page.insert_text((780, y), f"{cr:,.2f}", fontsize=8)
+        page.insert_text((850, y), f"{bal:,.2f}", fontsize=8)
+        y += 11
+        for extra in narr[1:]:
+            page.insert_text((330, y), extra, fontsize=8)
+            y += 11
+        y += 3
+    page.insert_text((40, y + 10), "Registered Office: Mumbai 400001", fontsize=8)     # margin footer after the table
+    return doc.tobytes(), built[-1][5]
+
+
+_ROWS = [("21/04/2026", ["UPI/1/SHOP"], 250.0, 0), ("22/04/2026", ["NEFT-ACME PVT LTD-SALARY", "APR PAYOUT"], 0, 55000.0),
+         ("23/04/2026", ["ATM CASH"], 5000.0, 0), ("25/04/2026", ["ACH D- BAJAJFINANCE 99"], 4500.0, 0)]
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_text_line_fallback(reverse):
+    pdf, closing_bal = _wide_pdf(_ROWS, 10000.0, reverse=reverse)
+    recs, meta = ae.parse_text_lines_pdf(pdf)
+    assert len(recs) == 4
+    assert reconcile_statement(recs, meta)["is_reconciled"]
+    assert meta["closing_balance"] == closing_bal
+    assert recs[1]["narration"] == "NEFT-ACME PVT LTD-SALARY APR PAYOUT"      # multi-line narration kept
+    assert "Registered" not in recs[-1]["narration"]                           # margin footer excluded
+    assert recs[1]["credit"] == 55000.0 and recs[0]["debit"] == 250.0
+
+
+def test_parse_statement_never_returns_unreconciled_as_ok():
+    pdf, _ = _wide_pdf(_ROWS, 10000.0)
+    recs, meta, parser, q = ae.parse_statement(pdf, detection={"detected_bank": "Generic Bank Statement"})
+    assert q["is_reconciled"] and len(recs) == 4
